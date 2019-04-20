@@ -255,7 +255,6 @@ bool ParseCContent(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & inpu
 template <typename CHAR_TYPE, typename INPUT>
 bool ParseComment(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
 {
-    
     // comment         =   "(" *([FWS] ccontent) [FWS] ")"
     auto inputState(Make_IOState(input));
     auto outputState(Make_IOState(output));
@@ -669,14 +668,12 @@ bool ParseGroup(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
         if (input.GetIf(':'))
         {
             output(':');
-            if (ParseGroupList(output, input))
+            ParseGroupList(output, input);
+            if (input.GetIf(';'))
             {
-                if (input.GetIf(';'))
-                {
-                    output(';');
-                    ParseCFWS(output, input);
-                    return outputState.Success() && inputState.Success();
-                }
+                output(';');
+                ParseCFWS(output, input);
+                return outputState.Success() && inputState.Success();
             }
         }
     }
