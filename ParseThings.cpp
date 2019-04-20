@@ -110,7 +110,7 @@ public:
 };
 
 template <typename INPUT>
-InputAdapter<INPUT> Make_InputAdapter(INPUT & input)
+InputAdapter<INPUT> Make_InputAdapter(INPUT && input)
 {
     return InputAdapter<INPUT>(input);
 }
@@ -193,7 +193,7 @@ bool ParseCRLF(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
 }
 
 template <typename PARSE, typename CHAR_TYPE, typename INPUT>
-bool ParseAtLeastOne(PARSE & parse, OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
+bool ParseAtLeastOne(PARSE && parse, OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
 {
     bool valid = false;
     while (parse(output, input))
@@ -344,7 +344,6 @@ template <typename CHAR_TYPE, typename INPUT>
 bool ParseAtom(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
 {
     // atom            =   [CFWS] 1*atext [CFWS]
-    bool valid = false;
     auto inputState(Make_IOState(input));
     auto outputState(Make_IOState(output));
     ParseCFWS(output, input);
@@ -501,7 +500,7 @@ bool ParseDText(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
     //                    %d94-126 /         ;  characters not including
     //                    obs-dtext          ;  "[", "]", or "\"
     auto ch(input());
-    if (ch >= 33 && ch <= 90 || ch >= 94 || ch <= 126)
+    if ((ch >= 33 && ch <= 90) || ch >= 94 || ch <= 126)
     {
         output(ch);
         return true;
@@ -618,7 +617,7 @@ bool ParseMailbox(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input
 }
 
 template <typename PARSER, typename CHAR_TYPE, typename INPUT>
-bool ParseList(PARSER & parser, OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
+bool ParseList(PARSER && parser, OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
 {
     // X-list    =   (X *("," X))
     auto inputState(Make_IOState(input));
@@ -698,7 +697,8 @@ void test_address(std::string const & addr)
     std::stringstream some_address(addr);
     std::cout << addr;
     OutputAdapter<char> output;
-    if (ParseAddressList(output, Make_InputAdapter([&] { return some_address.get(); })) && some_address.get() == EOF)
+    auto input(Make_InputAdapter([&] { return some_address.get(); }));
+    if (ParseAddressList(output, input) && some_address.get() == EOF)
     {
         std::cout << " is OK\n";
     }
