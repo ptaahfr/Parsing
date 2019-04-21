@@ -50,6 +50,22 @@ bool IsEmpty(std::tuple<ARGS...> tuple)
     return IsEmpty<0>(tuple);
 }
 
+template <typename ELEM>
+ELEM ElemTypeOrNull(std::vector<ELEM> const *);
+
+nullptr_t ElemTypeOrNull(nullptr_t = nullptr);
+
+template <typename ELEM>
+ELEM * PtrOrNull(ELEM & e)
+{
+    return &e;
+}
+
+nullptr_t PtrOrNull(nullptr_t = nullptr)
+{
+    return nullptr;
+}
+
 using TextWithComm = std::tuple<SubstringPos, SubstringPos, SubstringPos>; // CommentBefore, Content, CommentAfter
 enum TextWithCommFields
 {
@@ -234,10 +250,52 @@ public:
     }
 };
 
-#define MEMBER_NOTNULL(m, x) (m == nullptr ? nullptr : &m->x)
-#define FIELD_NOTNULL(m, x) (m == nullptr ? nullptr : &std::get<x>(*m))
-#define CLEAR_NOTNULL(m) [&]{ if (m) *m = { }; }()
-#define WRAP_PARSE(X) [&](auto * elem) { return X(elem); }
+template <size_t INDEX, typename... ARGS>
+auto FieldNotNull(std::tuple<ARGS...> * tu) -> decltype(&std::get<INDEX>(*tu))
+{
+    if (tu != nullptr)
+    {
+        return &std::get<INDEX>(*tu);
+    }
+    return nullptr;
+}
+
+template <size_t INDEX>
+nullptr_t FieldNotNull(nullptr_t = nullptr)
+{
+    return nullptr;
+}
+
+template <typename TYPE>
+void ClearNotNull(TYPE * t)
+{
+    if (t != nullptr)
+    {
+        *t = {};
+    }
+}
+
+void ClearNotNull(nullptr_t = nullptr)
+{
+}
+
+template <typename ELEM>
+void PushBackIfNotNull(std::vector<ELEM> * elems, ELEM const & elem)
+{
+    if (elems != nullptr)
+    {
+        elems->push_back(elem);
+    }
+}
+
+template <typename ELEM>
+void PushBackIfNotNull(nullptr_t, ELEM const &)
+{
+}
+
+#define FIELD_NOTNULL(m, x) FieldNotNull<x>(m)
+#define CLEAR_NOTNULL(m) ClearNotNull(m)
+#define WRAP_PARSE(X) [&](auto elem) { return X(elem); }
 
 template <typename INPUT, typename CHAR_TYPE>
 class ParserBase
@@ -290,17 +348,16 @@ protected:
         return SavedIOState(input_, output_);
     }
 
-    template <size_t MIN_COUNT, size_t MAX_COUNT, typename PARSER, typename ELEM = void *>
-    bool ParseRepeat(PARSER parser, std::vector<ELEM> * elems = nullptr)
+    template <size_t MIN_COUNT = 0, size_t MAX_COUNT = SIZE_MAX, typename ELEMS_PTR, typename PARSER>
+    bool ParseRepeat(ELEMS_PTR elems, PARSER parser)
     {
         size_t count = 0;
         for (; count < MAX_COUNT; ++count)
         {
-            ELEM elem;
-            if (parser(&elem))
+            decltype(ElemTypeOrNull(elems)) elem = {};
+            if (parser(PtrOrNull(elem)))
             {
-                if (elems)
-                    elems->push_back(elem);
+                PushBackIfNotNull(elems, elem);
             }
             else
             {
@@ -308,7 +365,13 @@ protected:
             }
         }
 
-        return (count >= MIN_COUNT);
+        if (count < MIN_COUNT)
+        {
+            CLEAR_NOTNULL(elems);
+            return false;
+        }
+
+        return true;
     }
 
     template <typename PREDICATE>
@@ -335,26 +398,48 @@ protected:
         return false;
     }
     
-    template <size_t OFFSET, typename PARSER, typename AST>
-    bool ParseSequence(PARSER parser, AST * ast)
+private:
+    template <size_t OFFSET, typename AST_PTR, typename PARSER>
+    bool ParseSequenceItem(AST_PTR ast, PARSER parser)
     {
         return parser(FIELD_NOTNULL(ast, OFFSET));
     }
-
-    template <size_t OFFSET, typename PARSER, typename... ARGS, typename AST>
-    bool ParseSequence(PARSER parser, ARGS... others, AST * ast)
+    
+    template <size_t OFFSET, typename AST_PTR, typename PARSER, typename... OTHERS>
+    bool ParseSequenceItem(AST_PTR ast, PARSER parser, OTHERS... others)
     {
-        auto ioState(Save());
         if (parser(FIELD_NOTNULL(ast, OFFSET)))
         {
-            if (ParseSequence<OFFSET + 1>(others...))
+            if (ParseSequenceItem<OFFSET + 1>(ast, others...))
             {
-                return ioState.Success();
+                return true;
             }
         }
         return false;
     }
 
+protected:
+    template <typename AST_PTR = nullptr_t, typename... PARSERS>
+    bool ParseSequence(AST_PTR ast, PARSERS... parsers)
+    {
+        auto ioState(Save());
+        if (ParseSequenceItem<0>(ast, parsers...))
+        {
+            return ioState.Success();
+        }
+        CLEAR_NOTNULL(ast);
+        return false;
+    }
+
+    template <size_t MIN_COUNT = 0, size_t MAX_COUNT = SIZE_MAX, typename ELEMS_PTR, typename... PARSERS>
+    bool ParseRepeatSequence(ELEMS_PTR elems, PARSERS... parsers)
+    {
+        return ParseRepeat<MIN_COUNT, MAX_COUNT>(elems, [&](auto elem)
+        {
+            return ParseSequence(elem, parsers...);
+        });
+    }
+/*
     template <typename PARSER>
     bool ParseAlt(PARSER parser)
     {
@@ -365,12 +450,13 @@ protected:
     bool ParseAlt(PARSER parser, ARGS... others)
     {
         return parser() || ParseAlt(others...);
-    }
+    }*/
 
-    template <typename PARSER, typename ELEM>
-    bool ParseList(PARSER parser, std::vector<ELEM> * list)
+    template <typename ELEM, typename PARSER>
+    bool ParseList(std::vector<ELEM> * list, PARSER parser)
     {
         // X-list    =   (X *("," X))
+
         auto ioState(Save());
         for (;;)
         {
@@ -381,8 +467,7 @@ protected:
                 return false;
             }
 
-            if (list)
-                list->push_back(elem);
+            PushBackIfNotNull(list, elem);
 
             if (input_.GetIf(','))
             {
@@ -393,19 +478,19 @@ protected:
     }
 
     // Core rules as defined in the Appendix B https://tools.ietf.org/html/rfc5234#appendix-B
-    bool ParseVCHAR(void * = nullptr)
+    bool ParseVCHAR(nullptr_t = nullptr)
     {
         // VCHAR          =  %x21-7E
         return ParseChar([&](auto ch) { return ch >= 0x10 && ch <= 0x7e; });
     }
 
-    bool ParseWSP(void * = nullptr)
+    bool ParseWSP(nullptr_t = nullptr)
     {
         // WSP            =  SP / HTAB
         return ParseChar([&](auto ch) { return ch == ' ' || ch == '\t'; });
     }
 
-    bool ParseCRLF(void * = nullptr)
+    bool ParseCRLF(nullptr_t = nullptr)
     {
         // CRLF        =  %d13.10
         if (this->input_.GetIf('\r'))
@@ -434,12 +519,12 @@ public:
     }
     
     // 3.2.2.  Folding White Space and Comments
-    bool ParseFWS()
+    bool ParseFWS(nullptr_t = nullptr)
     {
         // FWS             =   ([*WSP CRLF] 1*WSP) /  obs-FWS
         do
         {
-            if (!ParseRepeat<1, ~0>(WRAP_PARSE(ParseWSP), (std::vector<void *> *)nullptr))
+            if (!ParseRepeat<1>(nullptr, WRAP_PARSE(ParseWSP)))
             {
                 return false;
             }
@@ -450,7 +535,7 @@ public:
     }
 
 
-    bool ParseCText()
+    bool ParseCText(nullptr_t = nullptr)
     {
         // ctext           =   %d33-39 /          ; Printable US-ASCII
         //                     %d42-91 /          ;  characters not including
@@ -470,7 +555,7 @@ public:
     }
 
 
-    bool ParseQuotedPair()
+    bool ParseQuotedPair(nullptr_t = nullptr)
     {
         // quoted-pair     = ("\" (VCHAR / WSP))
         if (this->input_.GetIf('\\'))
@@ -481,9 +566,9 @@ public:
         return false;
     }
 
-    bool ParseCContent();
+    bool ParseCContent(nullptr_t = nullptr);
 
-    bool ParseComment()
+    bool ParseComment(nullptr_t = nullptr)
     {
         // comment         =   "(" *([FWS] ccontent) [FWS] ")"
         auto ioState(Save());
@@ -541,7 +626,7 @@ public:
     }
 
     // 3.2.3.  Atom
-    bool ParseAText(void * = nullptr)
+    bool ParseAText(nullptr_t = nullptr)
     {
         // atext           =   ALPHA / DIGIT /    ; Printable US-ASCII
         //                    "!" / "#" /        ;  characters not including
@@ -554,7 +639,7 @@ public:
         //                    "`" / "{" /
         //                    "|" / "}" /
         //                    "~"
-        auto isAChar = [](auto ch)
+        return ParseChar([](auto ch)
         {
             if (ch >= 'a' && ch <= 'z')
                 return true;
@@ -563,25 +648,17 @@ public:
             if (ch >= '0' && ch <= '9')
                 return true;
             return std::string("!#$%&\'*+-/=?^_`{|}~").find(ch) != std::string::npos;
-        };
-        auto ch(this->input_());
-        if (isAChar(ch))
-        {
-            this->output_(ch);
-            return true;
-        }
-        this->input_.Back();
-        return false;
+        });
     }
     
     template <typename PARSER>
-    bool ParseTextBetweenComment(PARSER parser, TextWithComm * result = nullptr)
+    bool ParseTextBetweenComment(TextWithComm * result, PARSER parser)
     {
         // TextBetweenComment            =   [CFWS] parser [CFWS]
         auto ioState(Save());
         ParseCFWS(FIELD_NOTNULL(result, TextWithCommFields_CommentBefore));
         size_t c1 = this->output_.Pos();
-        if (parser((void *)nullptr))
+        if (parser(nullptr))
         {
             size_t c2 = this->output_.Pos();
             ParseCFWS(FIELD_NOTNULL(result, TextWithCommFields_CommentAfter));
@@ -600,16 +677,16 @@ public:
     bool ParseAtom(TextWithComm * atom = nullptr)
     {
         // atom            =   [CFWS] 1*atext [CFWS]
-        return ParseTextBetweenComment([&](void *)
+        return ParseTextBetweenComment(atom, [&](void *)
         {
-            return ParseRepeat<1, ~0>(WRAP_PARSE(ParseAText));
-        }, atom);
+            return ParseRepeat<1>(nullptr, WRAP_PARSE(ParseAText));
+        });
     }
 
-    bool ParseDotAtomText(void * = nullptr)
+    bool ParseDotAtomText(nullptr_t = nullptr)
     {
         // dot-atom-text   =   1*atext *("." 1*atext)
-        if (ParseRepeat<1, ~0>(WRAP_PARSE(ParseAText)))
+        if (ParseRepeat<1>(nullptr, WRAP_PARSE(ParseAText)))
         {
             auto ioState(Save());
             for (;;)
@@ -617,7 +694,7 @@ public:
                 if (this->input_.GetIf('.'))
                 {
                     this->output_('.');
-                    if (false == ParseRepeat<1, ~0>(WRAP_PARSE(ParseAText)))
+                    if (false == ParseRepeat<1>(nullptr, WRAP_PARSE(ParseAText)))
                     {
                         return false;
                     }
@@ -635,10 +712,10 @@ public:
     bool ParseDotAtom(TextWithComm * dotAtom = nullptr)
     {
         // dot-atom        =   [CFWS] dot-atom-text [CFWS]
-        return ParseTextBetweenComment(WRAP_PARSE(ParseDotAtomText), dotAtom);
+        return ParseTextBetweenComment(dotAtom, WRAP_PARSE(ParseDotAtomText));
     }
 
-    bool ParseSpecials()
+    bool ParseSpecials(nullptr_t = nullptr)
     {
         // specials        =   "(" / ")" /        ; Special characters that do
         //                     "<" / ">" /        ;  not appear in atext
@@ -647,34 +724,20 @@ public:
         //                     "@" / "\" /
         //                     "," / "." /
         //                     DQUOTE
-        auto ch(this->input_());
-        if (std::string("()<>[]:;@\\,/\"").find(ch) != std::string::npos)
-        {
-            this->output_(ch);
-            return true;
-        }
-        this->input_.Back();
-        return false;
+        return ParseChar([](auto ch) { return std::string("()<>[]:;@\\,/\"").find(ch) != std::string::npos; });
     }
 
-    bool ParseQText()
+    bool ParseQText(nullptr_t = nullptr)
     {
        // qtext           =   %d33 /             ; Printable US-ASCII
        //                     %d35-91 /          ;  characters not including
        //                     %d93-126 /         ;  "\" or the quote character
        //                     obs-qtext
        
-        auto ch(this->input_());
-        if (ch == 33 || (ch >= 35 && ch <= 91) || (ch >= 93 && ch <= 126))
-        {
-            this->output_(ch);
-            return true;
-        }
-        this->input_.Back();
-        return false;
+        return ParseChar([](auto ch) { return ch == 33 || (ch >= 35 && ch <= 91) || (ch >= 93 && ch <= 126); });
     }
 
-    bool ParseQContent()
+    bool ParseQContent(nullptr_t = nullptr)
     {
         // qcontent        =   qtext / quoted-pair
 
@@ -686,33 +749,17 @@ public:
         // quoted-string   =   [CFWS]
         //                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
         //                     [CFWS]
-        auto ioState(Save());
-        ParseCFWS(FIELD_NOTNULL(quotedString, TextWithCommFields_CommentBefore));
-        if (this->input_.GetIf('\"'))
+        return ParseTextBetweenComment(quotedString, [&](void *)
         {
-            this->output_('\"');
-            size_t c1 = this->output_.Pos();
-            do
-            {
-                ParseFWS();
-            } while (ParseQContent());
-            size_t c2 = this->output_.Pos();
-
-            if (this->input_.GetIf('\"'))
-            {
-                this->output_('\"');
-                ParseCFWS(FIELD_NOTNULL(quotedString, TextWithCommFields_CommentAfter));
-
-                if (quotedString)
-                {
-                    std::get<TextWithCommFields_Content>(*quotedString) = std::make_pair(c1, c2);
-                }
-
-                return ioState.Success();
-            }
-        }
-        CLEAR_NOTNULL(quotedString);
-        return false;
+            return ParseSequence(nullptr,
+                [&](void *) { return ParseCharExact('\"'); },                                 // DQUOTE
+                [&](void *) { return ParseRepeatSequence(nullptr,                             // *(
+                    [&](void *) { return ParseRepeat<0, 1>(nullptr, WRAP_PARSE(ParseFWS)); }, // [FWS]
+                    WRAP_PARSE(ParseQContent)                                                 // qcontent
+                ); },                                                                         // )
+                [&](void *) { return ParseRepeat<0, 1>(nullptr, WRAP_PARSE(ParseFWS)); },     // [FWS]
+                [&](void *) { return ParseCharExact('\"'); });                                // DQUOTE
+        });
     }
 
     // 3.2.5.  Miscellaneous Tokens
@@ -726,7 +773,7 @@ public:
     bool ParsePhrase(MultiTextWithComm * phrase)
     {
         // phrase          =   1*word / obs-phrase
-        return ParseRepeat<1, ~0>(WRAP_PARSE(ParseWord), phrase);
+        return ParseRepeat<1, SIZE_MAX>(phrase, WRAP_PARSE(ParseWord));
     }
 
     // 3.4.1.  Addr-Spec Specification
@@ -866,7 +913,7 @@ public:
     bool ParseMailboxList(MailboxList * mailboxList)
     {
         // mailbox-list    =   (mailbox *("," mailbox)) / obs-mbox-list
-        return ParseList(WRAP_PARSE(ParseMailbox), mailboxList);
+        return ParseList(mailboxList, WRAP_PARSE(ParseMailbox));
     }
 
     bool ParseGroupList(Group * group)
@@ -908,12 +955,12 @@ public:
     bool ParseAddressList(AddressList * addresses)
     {
         // address-list    =   (address *("," address)) / obs-addr-list
-        return ParseList(WRAP_PARSE(ParseAddress), addresses);
+        return ParseList(addresses, WRAP_PARSE(ParseAddress));
     }
 };
 
 template <typename INPUT, typename CHAR_TYPE>
-bool ParserRFC5322<INPUT, CHAR_TYPE>::ParseCContent()
+bool ParserRFC5322<INPUT, CHAR_TYPE>::ParseCContent(nullptr_t)
 {
     // ccontent        =   ctext / quoted-pair / comment
     return ParseCText() || ParseQuotedPair() || ParseComment();
