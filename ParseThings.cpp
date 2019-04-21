@@ -3,57 +3,101 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <tuple>
+#include <utility>
 #include <vector>
 #include <exception>
 #include <sstream>
 #include <algorithm>
 #include <cassert>
 
+#ifdef _MSC_VER
+#pragma warning(disable: 4503)
+#endif
+
 using SubstringPos = std::pair<size_t, size_t>;
 
-struct TextWithComm
+bool IsEmpty(SubstringPos sub)
 {
-    SubstringPos CommentBefore = SubstringPos(0, 0);
-    SubstringPos Content = SubstringPos(0, 0);
-    SubstringPos CommentAfter = SubstringPos(0, 0);
+    return sub.second <= sub.first;
+}
+
+template <typename ELEM>
+bool IsEmpty(std::vector<ELEM> arr)
+{
+    for (auto const & elem : arr)
+    {
+        if (false == IsEmpty(elem))
+            return false;
+    }
+    return true;
+}
+
+template <size_t OFFSET, typename... ARGS>
+bool IsEmpty(std::tuple<ARGS...> tuple)
+{
+    enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(ARGS) - 1) };
+    if (false == IsEmpty(std::get<OFFSET>(tuple)))
+        return false;
+    if (NEXT_OFFSET > OFFSET)
+        return IsEmpty<NEXT_OFFSET>(tuple);
+    return true;
+}
+
+template <typename... ARGS>
+bool IsEmpty(std::tuple<ARGS...> tuple)
+{
+    return IsEmpty<0>(tuple);
+}
+
+using TextWithComm = std::tuple<SubstringPos, SubstringPos, SubstringPos>; // CommentBefore, Content, CommentAfter
+enum TextWithCommFields
+{
+    TextWithCommFields_CommentBefore,
+    TextWithCommFields_Content,
+    TextWithCommFields_CommentAfter
 };
 
 using MultiTextWithComm = std::vector<TextWithComm>;
 
-struct AddrSpec
+using AddrSpec = std::tuple<TextWithComm, TextWithComm>; // LocalPart, DomainPart
+enum AddrSpecFields
 {
-    TextWithComm LocalPart;
-    TextWithComm DomainPart;
+    AddrSpecFields_LocalPart,
+    AddrSpecFields_DomainPart,
 };
 
-struct AngleAddr
+using AngleAddr = std::tuple<SubstringPos, AddrSpec, SubstringPos>; // CommentBefore, Content, CommentAfter
+enum AngleAddrFields
 {
-    SubstringPos CommentBefore;
-    AddrSpec Content;
-    SubstringPos CommentAfter;
+    AngleAddrFields_CommentBefore,
+    AngleAddrFields_Content,
+    AngleAddrFields_CommentAfter
 };
 
-struct Mailbox
+using Mailbox = std::tuple<MultiTextWithComm, AngleAddr>; // DisplayName, Address
+enum MailboxFields
 {
-    MultiTextWithComm DisplayName;
-    AngleAddr Address;
+    MailboxFields_DisplayName,
+    MailboxFields_Address,
 };
 
 using MailboxList = std::vector<Mailbox>;
 
-struct Group
+using Group = std::tuple<MultiTextWithComm, MailboxList, SubstringPos>; // DisplayName, Members, Comment
+enum GroupFields
 {
-    MultiTextWithComm DisplayName;
-    MailboxList Members;
-    SubstringPos Comment;
+    GroupFields_DisplayName,
+    GroupFields_Members,
+    GroupFields_Comment
 };
 
-struct Address
+using Address = std::tuple<Mailbox, Group>;
+enum AddressFields
 {
-    Mailbox Mailbox;
-    Group Group;
+    AddressFields_Mailbox,
+    AddressFields_Group
 };
-
 using AddressList = std::vector<Address>;
 
 template <typename CHAR_TYPE>
@@ -69,28 +113,14 @@ std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, boo
 {
     std::basic_string<CHAR_TYPE> result;
 
-#if 1
     if (withComments)
     {
-        result += ToString(buffer, SubstringPos(text.CommentBefore.first, text.CommentAfter.second));
+        result += ToString(buffer, SubstringPos(std::get<TextWithCommFields_CommentBefore>(text).first, std::get<TextWithCommFields_CommentAfter>(text).second));
     }
     else
     {
-        result += ToString(buffer, text.Content);
+        result += ToString(buffer, std::get<TextWithCommFields_Content>(text));
     }
-#else
-    if (withComments)
-    {
-        result += ToString(buffer, text.CommentBefore);
-    }
-
-    result += ToString(buffer, text.Content);
-
-    if (withComments)
-    {
-        result += ToString(buffer, text.CommentAfter);
-    }
-#endif
 
     return result;
 }
@@ -106,11 +136,6 @@ std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, boo
         result += ToString(buffer, withComments, part);
     }
     return result;
-}
-
-bool IsEmpty(Mailbox const & mailbox)
-{
-    return mailbox.Address.Content.LocalPart.Content.second == mailbox.Address.Content.LocalPart.Content.first;
 }
 
 template <typename CHAR_TYPE>
@@ -210,6 +235,7 @@ public:
 };
 
 #define MEMBER_NOTNULL(m, x) (m == nullptr ? nullptr : &m->x)
+#define FIELD_NOTNULL(m, x) (m == nullptr ? nullptr : &std::get<x>(*m))
 #define CLEAR_NOTNULL(m) [&]{ if (m) *m = { }; }()
 #define WRAP_PARSE(X) [&](auto * elem) { return X(elem); }
 
@@ -264,29 +290,85 @@ protected:
         return SavedIOState(input_, output_);
     }
 
-    template <typename PARSE, typename ELEM = void *>
-    bool ParseAtLeastOne(PARSE && parse, std::vector<ELEM> * elems = nullptr)
+    template <size_t MIN_COUNT, size_t MAX_COUNT, typename PARSER, typename ELEM = void *>
+    bool ParseRepeat(PARSER parser, std::vector<ELEM> * elems = nullptr)
     {
-        bool valid = false;
-        for (;;)
+        size_t count = 0;
+        for (; count < MAX_COUNT; ++count)
         {
             ELEM elem;
-            if (parse(&elem))
+            if (parser(&elem))
             {
                 if (elems)
                     elems->push_back(elem);
-                valid = true;
             }
             else
             {
                 break;
             }
         }
-        return valid;
+
+        return (count >= MIN_COUNT);
+    }
+
+    template <typename PREDICATE>
+    bool ParseChar(PREDICATE pred)
+    {
+        auto ch(this->input_());
+        if (pred(ch))
+        {
+            this->output_(ch);
+            return true;
+        }
+        this->input_.Back();
+        return false;
+    }
+
+    template <typename CHAR_TYPE>
+    bool ParseCharExact(CHAR_TYPE ch)
+    {
+        if (input_.GetIf(ch))
+        {
+            this->output_(ch);
+            return true;
+        }
+        return false;
     }
     
+    template <size_t OFFSET, typename PARSER, typename AST>
+    bool ParseSequence(PARSER parser, AST * ast)
+    {
+        return parser(FIELD_NOTNULL(ast, OFFSET));
+    }
+
+    template <size_t OFFSET, typename PARSER, typename... ARGS, typename AST>
+    bool ParseSequence(PARSER parser, ARGS... others, AST * ast)
+    {
+        auto ioState(Save());
+        if (parser(FIELD_NOTNULL(ast, OFFSET)))
+        {
+            if (ParseSequence<OFFSET + 1>(others...))
+            {
+                return ioState.Success();
+            }
+        }
+        return false;
+    }
+
+    template <typename PARSER>
+    bool ParseAlt(PARSER parser)
+    {
+        return parser();
+    }
+
+    template <typename PARSER, typename... ARGS>
+    bool ParseAlt(PARSER parser, ARGS... others)
+    {
+        return parser() || ParseAlt(others...);
+    }
+
     template <typename PARSER, typename ELEM>
-    bool ParseList(PARSER && parser, std::vector<ELEM> * list)
+    bool ParseList(PARSER parser, std::vector<ELEM> * list)
     {
         // X-list    =   (X *("," X))
         auto ioState(Save());
@@ -311,34 +393,19 @@ protected:
     }
 
     // Core rules as defined in the Appendix B https://tools.ietf.org/html/rfc5234#appendix-B
-
-    bool ParseVCHAR()
+    bool ParseVCHAR(void * = nullptr)
     {
         // VCHAR          =  %x21-7E
-        auto ch(this->input_());
-        if (ch >= 0x21 && ch < 0x7e)
-        {
-            this->output_(ch);
-            return true;
-        }
-        this->input_.Back();
-        return false;
+        return ParseChar([&](auto ch) { return ch >= 0x10 && ch <= 0x7e; });
     }
 
     bool ParseWSP(void * = nullptr)
     {
         // WSP            =  SP / HTAB
-        auto ch(this->input_());
-        if (ch == ' ' || ch == '\t')
-        {
-            this->output_(ch);
-            return true;
-        }
-        this->input_.Back();
-        return false;
+        return ParseChar([&](auto ch) { return ch == ' ' || ch == '\t'; });
     }
 
-    bool ParseCRLF()
+    bool ParseCRLF(void * = nullptr)
     {
         // CRLF        =  %d13.10
         if (this->input_.GetIf('\r'))
@@ -372,7 +439,7 @@ public:
         // FWS             =   ([*WSP CRLF] 1*WSP) /  obs-FWS
         do
         {
-            if (!ParseAtLeastOne(WRAP_PARSE(ParseWSP), (std::vector<void *> *)nullptr))
+            if (!ParseRepeat<1, ~0>(WRAP_PARSE(ParseWSP), (std::vector<void *> *)nullptr))
             {
                 return false;
             }
@@ -389,30 +456,27 @@ public:
         //                     %d42-91 /          ;  characters not including
         //                     %d93-126 /         ;  "(", ")", or "\"
         //                     obs-ctext
-        auto ch(this->input_());
-        if (ch >= 33 && ch <= 39)
-            return true;
-        if (ch >= 42 && ch <= 91)
-            return true;
-        if (ch >= 93 && ch <= 126)
-            return true;
-        this->input_.Back();
-        return false;
+
+        return this->ParseChar([&](auto ch)
+        {
+            if (ch >= 33 && ch <= 39)
+                return true;
+            if (ch >= 42 && ch <= 91)
+                return true;
+            if (ch >= 93 && ch <= 126)
+                return true;
+            return false;
+        });
     }
 
 
     bool ParseQuotedPair()
     {
         // quoted-pair     = ("\" (VCHAR / WSP))
-        auto ioState(Save());
         if (this->input_.GetIf('\\'))
         {
-            this->output_('\\');
-            if (ParseVCHAR() || ParseWSP())
-            {
-                return ioState.Success();
-            }
-            return true;
+            this->output_('\\', true);
+            return (ParseVCHAR() || ParseWSP());
         }
         return false;
     }
@@ -476,9 +540,7 @@ public:
         return valid;
     }
 
-
     // 3.2.3.  Atom
-
     bool ParseAText(void * = nullptr)
     {
         // atext           =   ALPHA / DIGIT /    ; Printable US-ASCII
@@ -511,33 +573,43 @@ public:
         this->input_.Back();
         return false;
     }
-
-    bool ParseAtom(TextWithComm * atom = nullptr)
+    
+    template <typename PARSER>
+    bool ParseTextBetweenComment(PARSER parser, TextWithComm * result = nullptr)
     {
-        // atom            =   [CFWS] 1*atext [CFWS]
+        // TextBetweenComment            =   [CFWS] parser [CFWS]
         auto ioState(Save());
-        ParseCFWS(MEMBER_NOTNULL(atom, CommentBefore));
+        ParseCFWS(FIELD_NOTNULL(result, TextWithCommFields_CommentBefore));
         size_t c1 = this->output_.Pos();
-        if (ParseAtLeastOne(WRAP_PARSE(ParseAText)))
+        if (parser((void *)nullptr))
         {
             size_t c2 = this->output_.Pos();
-            ParseCFWS(MEMBER_NOTNULL(atom, CommentAfter));
+            ParseCFWS(FIELD_NOTNULL(result, TextWithCommFields_CommentAfter));
 
-            if (atom)
+            if (result)
             {
-                atom->Content = std::make_pair(c1, c2);
+                std::get<TextWithCommFields_Content>(*result) = std::make_pair(c1, c2);
             }
 
             return ioState.Success();
         }
-        CLEAR_NOTNULL(atom);
+        CLEAR_NOTNULL(result);
         return false;
     }
 
-    bool ParseDotAtomText()
+    bool ParseAtom(TextWithComm * atom = nullptr)
+    {
+        // atom            =   [CFWS] 1*atext [CFWS]
+        return ParseTextBetweenComment([&](void *)
+        {
+            return ParseRepeat<1, ~0>(WRAP_PARSE(ParseAText));
+        }, atom);
+    }
+
+    bool ParseDotAtomText(void * = nullptr)
     {
         // dot-atom-text   =   1*atext *("." 1*atext)
-        if (ParseAtLeastOne(WRAP_PARSE(ParseAText)))
+        if (ParseRepeat<1, ~0>(WRAP_PARSE(ParseAText)))
         {
             auto ioState(Save());
             for (;;)
@@ -545,7 +617,7 @@ public:
                 if (this->input_.GetIf('.'))
                 {
                     this->output_('.');
-                    if (false == ParseAtLeastOne(WRAP_PARSE(ParseAText)))
+                    if (false == ParseRepeat<1, ~0>(WRAP_PARSE(ParseAText)))
                     {
                         return false;
                     }
@@ -563,23 +635,7 @@ public:
     bool ParseDotAtom(TextWithComm * dotAtom = nullptr)
     {
         // dot-atom        =   [CFWS] dot-atom-text [CFWS]
-        auto ioState(Save());
-        ParseCFWS(MEMBER_NOTNULL(dotAtom, CommentBefore));
-        size_t c1 = this->output_.Pos();
-        if (ParseDotAtomText())
-        {
-            size_t c2 = this->output_.Pos();
-            ParseCFWS(MEMBER_NOTNULL(dotAtom, CommentAfter));
-
-            if (dotAtom)
-            {
-                dotAtom->Content = std::make_pair(c1, c2);
-            }
-
-            return ioState.Success();
-        }
-        CLEAR_NOTNULL(dotAtom);
-        return false;
+        return ParseTextBetweenComment(WRAP_PARSE(ParseDotAtomText), dotAtom);
     }
 
     bool ParseSpecials()
@@ -631,7 +687,7 @@ public:
         //                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
         //                     [CFWS]
         auto ioState(Save());
-        ParseCFWS(MEMBER_NOTNULL(quotedString, CommentBefore));
+        ParseCFWS(FIELD_NOTNULL(quotedString, TextWithCommFields_CommentBefore));
         if (this->input_.GetIf('\"'))
         {
             this->output_('\"');
@@ -645,11 +701,11 @@ public:
             if (this->input_.GetIf('\"'))
             {
                 this->output_('\"');
-                ParseCFWS(MEMBER_NOTNULL(quotedString, CommentAfter));
+                ParseCFWS(FIELD_NOTNULL(quotedString, TextWithCommFields_CommentAfter));
 
                 if (quotedString)
                 {
-                    quotedString->Content = std::make_pair(c1, c2);
+                    std::get<TextWithCommFields_Content>(*quotedString) = std::make_pair(c1, c2);
                 }
 
                 return ioState.Success();
@@ -670,7 +726,7 @@ public:
     bool ParsePhrase(MultiTextWithComm * phrase)
     {
         // phrase          =   1*word / obs-phrase
-        return ParseAtLeastOne(WRAP_PARSE(ParseWord), phrase);
+        return ParseRepeat<1, ~0>(WRAP_PARSE(ParseWord), phrase);
     }
 
     // 3.4.1.  Addr-Spec Specification
@@ -700,7 +756,7 @@ public:
     {
         // domain-literal  =   [CFWS] "[" *([FWS] dtext) [FWS] "]" [CFWS]
         auto ioState(Save());
-        ParseCFWS(MEMBER_NOTNULL(domainLiteral, CommentBefore));
+        ParseCFWS(FIELD_NOTNULL(domainLiteral, TextWithCommFields_CommentBefore));
         if (this->input_.GetIf('['))
         {
             size_t c1 = this->output_.Pos();
@@ -716,11 +772,11 @@ public:
             if (this->input_.GetIf(']'))
             {
                 this->output_(']');
-                ParseCFWS(MEMBER_NOTNULL(domainLiteral, CommentAfter));
+                ParseCFWS(FIELD_NOTNULL(domainLiteral, TextWithCommFields_CommentAfter));
             
                 if (domainLiteral)
                 {
-                    domainLiteral->Content = std::make_pair(c1, c2);
+                    std::get<TextWithCommFields_Content>(*domainLiteral) = std::make_pair(c1, c2);
                 }
 
                 return ioState.Success();
@@ -741,12 +797,12 @@ public:
     {
         // addr-spec       =   local-part "@" domain
         auto ioState(Save());
-        if (ParseLocalPart(MEMBER_NOTNULL(addrSpec, LocalPart)))
+        if (ParseLocalPart(FIELD_NOTNULL(addrSpec, AddrSpecFields_LocalPart)))
         {
             if (this->input_.GetIf('@'))
             {
                 this->output_('@');
-                if (ParseDomain(MEMBER_NOTNULL(addrSpec, DomainPart)))
+                if (ParseDomain(FIELD_NOTNULL(addrSpec, AddrSpecFields_DomainPart)))
                 {
                     return ioState.Success();
                 }
@@ -763,16 +819,16 @@ public:
         // angle-addr      =   [CFWS] "<" addr-spec ">" [CFWS] /
         //                 obs-angle-addr
         auto ioState(Save());
-        ParseCFWS(MEMBER_NOTNULL(angleAddr, CommentBefore));
+        ParseCFWS(FIELD_NOTNULL(angleAddr, AngleAddrFields_CommentBefore));
         if (this->input_.GetIf('<'))
         {
             this->output_('<');
-            if (ParseAddrSpec(MEMBER_NOTNULL(angleAddr, Content)))
+            if (ParseAddrSpec(FIELD_NOTNULL(angleAddr, AngleAddrFields_Content)))
             {
                 if (this->input_.GetIf('>'))
                 {
                     this->output_('>');
-                    ParseCFWS(MEMBER_NOTNULL(angleAddr, CommentAfter));
+                    ParseCFWS(FIELD_NOTNULL(angleAddr, AngleAddrFields_CommentAfter));
 
                     return ioState.Success();
                 }
@@ -792,8 +848,8 @@ public:
     {
         // name-addr       =   [display-name] angle-addr
         auto ioState(Save());
-        ParseDisplayName(MEMBER_NOTNULL(nameAddr, DisplayName));
-        if (ParseAngleAddr(MEMBER_NOTNULL(nameAddr, Address)))
+        ParseDisplayName(FIELD_NOTNULL(nameAddr, MailboxFields_DisplayName));
+        if (ParseAngleAddr(FIELD_NOTNULL(nameAddr, MailboxFields_Address)))
         {
             return ioState.Success();
         }
@@ -804,7 +860,7 @@ public:
     bool ParseMailbox(Mailbox * mailbox)
     {
         // mailbox         =   name-addr / addr-spec
-        return ParseNameAddr(mailbox) || ParseAddrSpec(MEMBER_NOTNULL(mailbox, Address.Content));
+        return ParseNameAddr(mailbox) || ParseAddrSpec(FIELD_NOTNULL(FIELD_NOTNULL(mailbox, MailboxFields_Address), AngleAddrFields_Content));
     }
 
     bool ParseMailboxList(MailboxList * mailboxList)
@@ -813,25 +869,18 @@ public:
         return ParseList(WRAP_PARSE(ParseMailbox), mailboxList);
     }
 
-    bool ParseAddress(Address * address);
-
-    bool ParseAddressList(AddressList * addresses)
-    {
-        // address-list    =   (address *("," address)) / obs-addr-list
-        return ParseList(WRAP_PARSE(ParseAddress), addresses);
-    }
-
     bool ParseGroupList(Group * group)
     {
         // group-list      =   mailbox-list / CFWS / obs-group-list
-        return ParseMailboxList(MEMBER_NOTNULL(group, Members)) || ParseCFWS(MEMBER_NOTNULL(group, Comment));
+        return ParseMailboxList(FIELD_NOTNULL(group, GroupFields_Members)) || ParseCFWS(FIELD_NOTNULL(group, GroupFields_Comment));
     }
 
     bool ParseGroup(Group * group)
     {
         // group           =   display-name ":" [group-list] ";" [CFWS]
         auto ioState(Save());
-        if (ParseDisplayName(MEMBER_NOTNULL(group, DisplayName)))
+
+        if (ParseDisplayName(FIELD_NOTNULL(group, GroupFields_DisplayName)))
         {
             if (this->input_.GetIf(':'))
             {
@@ -840,7 +889,7 @@ public:
                 if (this->input_.GetIf(';'))
                 {
                     this->output_(';');
-                    ParseCFWS(MEMBER_NOTNULL(group, Comment));
+                    ParseCFWS(FIELD_NOTNULL(group, GroupFields_Comment));
                     return ioState.Success();
                 }
             }
@@ -849,6 +898,18 @@ public:
         CLEAR_NOTNULL(group);
         return false;
     }
+
+    bool ParseAddress(Address * address)
+    {
+        // address         =   mailbox / group
+        return ParseMailbox(FIELD_NOTNULL(address, AddressFields_Mailbox)) || ParseGroup(FIELD_NOTNULL(address, AddressFields_Group));
+    }
+
+    bool ParseAddressList(AddressList * addresses)
+    {
+        // address-list    =   (address *("," address)) / obs-addr-list
+        return ParseList(WRAP_PARSE(ParseAddress), addresses);
+    }
 };
 
 template <typename INPUT, typename CHAR_TYPE>
@@ -856,13 +917,6 @@ bool ParserRFC5322<INPUT, CHAR_TYPE>::ParseCContent()
 {
     // ccontent        =   ctext / quoted-pair / comment
     return ParseCText() || ParseQuotedPair() || ParseComment();
-}
-
-template <typename INPUT, typename CHAR_TYPE>
-bool ParserRFC5322<INPUT, CHAR_TYPE>::ParseAddress(Address * address)
-{
-    // address         =   mailbox / group
-    return ParseMailbox(MEMBER_NOTNULL(address, Mailbox)) || ParseGroup(MEMBER_NOTNULL(address, Group));
 }
 
 template <typename INPUT, typename CHAR_TYPE>
@@ -891,22 +945,24 @@ void test_address(std::string const & addr)
             auto displayMailBox = [&](auto const & mailbox, auto indent)
             {
                 std::cout << indent << "   Mailbox:" << std::endl;
-                std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, mailbox.DisplayName) << "'" << std::endl;
-                std::cout << indent << "     Adress: " <<std::endl;
-                std::cout << indent << "       Local-Part: '" << ToString(outBuffer, false, mailbox.Address.Content.LocalPart) << "'" << std::endl;
-                std::cout << indent << "       Domain-Part: '" << ToString(outBuffer, false, mailbox.Address.Content.DomainPart) << "'" << std::endl;
+                std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, std::get<MailboxFields_DisplayName>(mailbox)) << "'" << std::endl;
+                std::cout << indent << "     Adress: " << std::endl;
+                auto const & addrSpec = std::get<AngleAddrFields_Content>(std::get<MailboxFields_Address>(mailbox));
+                std::cout << indent << "       Local-Part: '" << ToString(outBuffer, false, std::get<AddrSpecFields_LocalPart>(addrSpec)) << "'" << std::endl;
+                std::cout << indent << "       Domain-Part: '" << ToString(outBuffer, false, std::get<AddrSpecFields_DomainPart>(addrSpec)) << "'" << std::endl;
             };
 
-            if (false == IsEmpty(address.Mailbox))
+            if (false == IsEmpty(std::get<AddressFields_Mailbox>(address)))
             {
-                displayMailBox(address.Mailbox, "");
+                displayMailBox(std::get<AddressFields_Mailbox>(address), "");
             }
             else
             {
+                auto const & group = std::get<AddressFields_Group>(address);
                 std::cout << "   Group:" << std::endl;
-                std::cout << "     Display Name: '" << ToString(outBuffer, false, address.Group.DisplayName) << "'" << std::endl;
+                std::cout << "     Display Name: '" << ToString(outBuffer, true, std::get<GroupFields_DisplayName>(group)) << "'" << std::endl;
                 std::cout << "     Members:" << std::endl;
-                for (auto const & groupAddr : address.Group.Members)
+                for (auto const & groupAddr : std::get<GroupFields_Members>(group))
                 {
                     displayMailBox(groupAddr, "   ");
                 }
