@@ -68,6 +68,17 @@ template <typename CHAR_TYPE>
 std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, bool withComments, TextWithComm const & text)
 {
     std::basic_string<CHAR_TYPE> result;
+
+#if 1
+    if (withComments)
+    {
+        result += ToString(buffer, SubstringPos(text.CommentBefore.first, text.CommentAfter.second));
+    }
+    else
+    {
+        result += ToString(buffer, text.Content);
+    }
+#else
     if (withComments)
     {
         result += ToString(buffer, text.CommentBefore);
@@ -79,6 +90,7 @@ std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, boo
     {
         result += ToString(buffer, text.CommentAfter);
     }
+#endif
 
     return result;
 }
@@ -197,653 +209,666 @@ public:
     }
 };
 
-template <typename INPUT>
-InputAdapter<INPUT> Make_InputAdapter(INPUT && input)
-{
-    return InputAdapter<INPUT>(input);
-}
-
-template <typename INPUT, typename OUTPUT>
-class SavedIOState
-{
-    INPUT & input_;
-    OUTPUT & output_;
-    size_t inputPos_;
-    size_t outputPos_;
-public:
-    SavedIOState(INPUT & input, OUTPUT & output)
-        : input_(input), output_(output), inputPos_(input.Pos()), outputPos_(output.Pos())
-    {
-    }
-
-    ~SavedIOState()
-    {
-        if (inputPos_ != (size_t)-1)
-        {
-            input_.SetPos(inputPos_);
-        }
-        if (outputPos_ != (size_t)-1)
-        {
-            output_.SetPos(outputPos_);
-        }
-    }
-
-    bool Success()
-    {
-        inputPos_ = (size_t)-1;
-        outputPos_ = (size_t)-1;
-        return true;
-    }
-};
-
-template <typename INPUT, typename OUTPUT>
-SavedIOState<INPUT, OUTPUT> SaveIOState(INPUT & input, OUTPUT & output)
-{
-    return SavedIOState<INPUT, OUTPUT>(input, output);
-}
-
 #define MEMBER_NOTNULL(m, x) (m == nullptr ? nullptr : &m->x)
-#define CLEAR_NOTNULL(m) { if (m) *m = { }; }
+#define CLEAR_NOTNULL(m) [&]{ if (m) *m = { }; }()
+#define WRAP_PARSE(X) [&](auto * elem) { return X(elem); }
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseVCHAR(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
+template <typename INPUT, typename CHAR_TYPE>
+class ParserBase
 {
-    // VCHAR          =  %x21-7E
-    auto ch(input());
-    if (ch >= 0x21 && ch < 0x7e)
+protected:
+    InputAdapter<INPUT> input_;
+    OutputAdapter<CHAR_TYPE> output_;
+public:
+    ParserBase(INPUT & input)
+        : input_(input)
     {
-        output(ch);
-        return true;
     }
-    input.Back();
-    return false;
-}
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseWSP(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, void * = nullptr)
-{
-    // WSP            =  SP / HTAB
-    auto ch(input());
-    if (ch == ' ' || ch == '\t')
+    auto const & OutputBuffer() const { return output_.Buffer(); }
+protected:
+    class SavedIOState
     {
-        output(ch);
-        return true;
-    }
-    input.Back();
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseCRLF(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // CRLF        =  %d13.10
-    if (input.GetIf('\r'))
-    {
-        if (input.GetIf('\n'))
+        InputAdapter<INPUT> & input_;
+        OutputAdapter<CHAR_TYPE> & output_;
+        size_t inputPos_;
+        size_t outputPos_;
+    public:
+        SavedIOState(InputAdapter<INPUT> & input, OutputAdapter<CHAR_TYPE> & output)
+            : input_(input), output_(output), inputPos_(input.Pos()), outputPos_(output.Pos())
         {
-            output('\r');
-            output('\n');
+        }
+
+        ~SavedIOState()
+        {
+            if (inputPos_ != (size_t)-1)
+            {
+                input_.SetPos(inputPos_);
+            }
+            if (outputPos_ != (size_t)-1)
+            {
+                output_.SetPos(outputPos_);
+            }
+        }
+
+        bool Success()
+        {
+            inputPos_ = (size_t)-1;
+            outputPos_ = (size_t)-1;
             return true;
         }
-    }
-
-    return false;
-}
-
-template <typename PARSE, typename CHAR_TYPE, typename INPUT, typename ELEM = void *>
-bool ParseAtLeastOne(PARSE && parse, OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, std::vector<ELEM> * elems = nullptr)
-{
-    bool valid = false;
-    for (;;)
-    {
-        ELEM elem;
-        if (parse(output, input, &elem))
-        {
-            if (elems)
-                elems->push_back(elem);
-            valid = true;
-        }
-        else
-        {
-            break;
-        }
-    }
-    return valid;
-}
-
-#define WRAP_PARSE(X) [](auto & output, auto & input, auto * elem) { return X(output, input, elem); }
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseFWS(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // FWS             =   ([*WSP CRLF] 1*WSP) /  obs-FWS
-    do
-    {
-        if (!ParseAtLeastOne(WRAP_PARSE(ParseWSP), output, input, (std::vector<void *> *)nullptr))
-        {
-            return false;
-        }
-    }
-    while (ParseCRLF(output, input));
-
-    return true;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseCText(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // ctext           =   %d33-39 /          ; Printable US-ASCII
-    //                     %d42-91 /          ;  characters not including
-    //                     %d93-126 /         ;  "(", ")", or "\"
-    //                     obs-ctext
-    auto ch(input());
-    if (ch >= 33 && ch <= 39)
-        return true;
-    if (ch >= 42 && ch <= 91)
-        return true;
-    if (ch >= 93 && ch <= 126)
-        return true;
-    input.Back();
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseQuotedPair(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // quoted-pair     = ("\" (VCHAR / WSP))
-    auto ioState(SaveIOState(input, output));
-    if (input.GetIf('\\'))
-    {
-        output('\\');
-        if (ParseVCHAR(output, input) || ParseWSP(output, input))
-        {
-            return ioState.Success();
-        }
-        return true;
-    }
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseCContent(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input);
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseComment(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // comment         =   "(" *([FWS] ccontent) [FWS] ")"
-    auto ioState(SaveIOState(input, output));
-    if (input.GetIf('('))
-    {
-        output('(');
-        do
-        {
-            ParseFWS(output, input);
-        } while (ParseCContent(output, input));
-
-        ParseFWS(output, input);
-
-        if (input.GetIf(')'))
-        {
-            output(')');
-            return ioState.Success();
-        }
-    }
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseCContent(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // ccontent        =   ctext / quoted-pair / comment
-    return ParseCText(output, input) || ParseQuotedPair(output, input) || ParseComment(output, input);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseCFWS(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, SubstringPos * comment)
-{
-    // CFWS            =   (1*([FWS] comment) [FWS]) / FWS
-    bool valid = false;
-    if (comment)
-        comment->first = output.Pos();
-    for (;;)
-    {
-        if (ParseFWS(output, input))
-        {
-            valid = true;
-        }
-        if (ParseComment(output, input))
-        {
-            valid = true;
-            continue;
-        }
-        break;
-    }
-    if (comment)
-        comment->second = output.Pos();
-    if (!valid)
-        CLEAR_NOTNULL(comment);
-    return valid;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseAText(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, void * = nullptr)
-{
-    // atext           =   ALPHA / DIGIT /    ; Printable US-ASCII
-    //                    "!" / "#" /        ;  characters not including
-    //                    "$" / "%" /        ;  specials.  Used for atoms.
-    //                    "&" / "'" /
-    //                    "*" / "+" /
-    //                    "-" / "/" /
-    //                    "=" / "?" /
-    //                    "^" / "_" /
-    //                    "`" / "{" /
-    //                    "|" / "}" /
-    //                    "~"
-    auto isAChar = [](auto ch)
-    {
-        if (ch >= 'a' && ch <= 'z')
-            return true;
-        if (ch >= 'A' && ch <= 'Z')
-            return true;
-        if (ch >= '0' && ch <= '9')
-            return true;
-        return std::string("!#$%&\'*+-/=?^_`{|}~").find(ch) != std::string::npos;
     };
-    auto ch(input());
-    if (isAChar(ch))
+
+    SavedIOState Save()
     {
-        output(ch);
-        return true;
+        return SavedIOState(input_, output_);
     }
-    input.Back();
-    return false;
-}
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseAtom(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, TextWithComm * atom = nullptr)
-{
-    // atom            =   [CFWS] 1*atext [CFWS]
-    auto ioState(SaveIOState(input, output));
-    ParseCFWS(output, input, MEMBER_NOTNULL(atom, CommentBefore));
-    size_t c1 = output.Pos();
-    if (ParseAtLeastOne(WRAP_PARSE(ParseAText), output, input))
+    template <typename PARSE, typename ELEM = void *>
+    bool ParseAtLeastOne(PARSE && parse, std::vector<ELEM> * elems = nullptr)
     {
-        size_t c2 = output.Pos();
-        ParseCFWS(output, input, MEMBER_NOTNULL(atom, CommentAfter));
-
-        if (atom)
-        {
-            atom->Content = std::make_pair(c1, c2);
-        }
-
-        return ioState.Success();
-    }
-    CLEAR_NOTNULL(atom);
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseDotAtomText(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // dot-atom-text   =   1*atext *("." 1*atext)
-    if (ParseAtLeastOne(WRAP_PARSE(ParseAText), output, input))
-    {
-        auto ioState(SaveIOState(input, output));
+        bool valid = false;
         for (;;)
         {
-            if (input.GetIf('.'))
+            ELEM elem;
+            if (parse(&elem))
             {
-                output('.');
-                if (false == ParseAtLeastOne(WRAP_PARSE(ParseAText), output, input))
-                {
-                    return false;
-                }
+                if (elems)
+                    elems->push_back(elem);
+                valid = true;
             }
             else
             {
+                break;
+            }
+        }
+        return valid;
+    }
+    
+    template <typename PARSER, typename ELEM>
+    bool ParseList(PARSER && parser, std::vector<ELEM> * list)
+    {
+        // X-list    =   (X *("," X))
+        auto ioState(Save());
+        for (;;)
+        {
+            ELEM elem;
+            if (parser(&elem) == false)
+            {
+                CLEAR_NOTNULL(list);
+                return false;
+            }
+
+            if (list)
+                list->push_back(elem);
+
+            if (input_.GetIf(','))
+            {
+                continue;
+            }
+            return ioState.Success();
+        }
+    }
+
+    // Core rules as defined in the Appendix B https://tools.ietf.org/html/rfc5234#appendix-B
+
+    bool ParseVCHAR()
+    {
+        // VCHAR          =  %x21-7E
+        auto ch(this->input_());
+        if (ch >= 0x21 && ch < 0x7e)
+        {
+            this->output_(ch);
+            return true;
+        }
+        this->input_.Back();
+        return false;
+    }
+
+    bool ParseWSP(void * = nullptr)
+    {
+        // WSP            =  SP / HTAB
+        auto ch(this->input_());
+        if (ch == ' ' || ch == '\t')
+        {
+            this->output_(ch);
+            return true;
+        }
+        this->input_.Back();
+        return false;
+    }
+
+    bool ParseCRLF()
+    {
+        // CRLF        =  %d13.10
+        if (this->input_.GetIf('\r'))
+        {
+            if (this->input_.GetIf('\n'))
+            {
+                this->output_('\r');
+                this->output_('\n');
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+};
+
+// Rules defined in https://tools.ietf.org/html/rfc5322
+template <typename INPUT, typename CHAR_TYPE = char>
+class ParserRFC5322 : public ParserBase<INPUT, CHAR_TYPE>
+{
+public:
+    ParserRFC5322(INPUT & input)
+        : ParserBase(input)
+    {
+    }
+    
+    // 3.2.2.  Folding White Space and Comments
+    bool ParseFWS()
+    {
+        // FWS             =   ([*WSP CRLF] 1*WSP) /  obs-FWS
+        do
+        {
+            if (!ParseAtLeastOne(WRAP_PARSE(ParseWSP), (std::vector<void *> *)nullptr))
+            {
+                return false;
+            }
+        }
+        while (ParseCRLF());
+
+        return true;
+    }
+
+
+    bool ParseCText()
+    {
+        // ctext           =   %d33-39 /          ; Printable US-ASCII
+        //                     %d42-91 /          ;  characters not including
+        //                     %d93-126 /         ;  "(", ")", or "\"
+        //                     obs-ctext
+        auto ch(this->input_());
+        if (ch >= 33 && ch <= 39)
+            return true;
+        if (ch >= 42 && ch <= 91)
+            return true;
+        if (ch >= 93 && ch <= 126)
+            return true;
+        this->input_.Back();
+        return false;
+    }
+
+
+    bool ParseQuotedPair()
+    {
+        // quoted-pair     = ("\" (VCHAR / WSP))
+        auto ioState(Save());
+        if (this->input_.GetIf('\\'))
+        {
+            this->output_('\\');
+            if (ParseVCHAR() || ParseWSP())
+            {
+                return ioState.Success();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    bool ParseCContent();
+
+    bool ParseComment()
+    {
+        // comment         =   "(" *([FWS] ccontent) [FWS] ")"
+        auto ioState(Save());
+        if (this->input_.GetIf('('))
+        {
+            this->output_('(');
+            do
+            {
+                ParseFWS();
+            } while (ParseCContent());
+
+            ParseFWS();
+
+            if (this->input_.GetIf(')'))
+            {
+                this->output_(')');
                 return ioState.Success();
             }
         }
+        return false;
     }
 
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseDotAtom(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, TextWithComm * dotAtom = nullptr)
-{
-    // dot-atom        =   [CFWS] dot-atom-text [CFWS]
-    auto ioState(SaveIOState(input, output));
-    ParseCFWS(output, input, MEMBER_NOTNULL(dotAtom, CommentBefore));
-    size_t c1 = output.Pos();
-    if (ParseDotAtomText(output, input))
+    bool ParseCFWS(SubstringPos * comment)
     {
-        size_t c2 = output.Pos();
-        ParseCFWS(output, input, MEMBER_NOTNULL(dotAtom, CommentAfter));
+        // CFWS            =   (1*([FWS] comment) [FWS]) / FWS
+        bool valid = false;
 
-        if (dotAtom)
+        if (comment)
+            comment->first = this->output_.Pos();
+        for (;;)
         {
-            dotAtom->Content = std::make_pair(c1, c2);
+            if (ParseFWS())
+            {
+                valid = true;
+            }
+            if (ParseComment())
+            {
+                valid = true;
+                continue;
+            }
+            break;
+        }
+        if (comment)
+            comment->second = this->output_.Pos();
+
+        if (!valid)
+        {
+            if (comment)
+            {
+                comment->first = comment->second = this->output_.Pos();
+            }
         }
 
-        return ioState.Success();
+        return valid;
     }
-    CLEAR_NOTNULL(dotAtom);
-    return false;
-}
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseSpecials(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // specials        =   "(" / ")" /        ; Special characters that do
-    //                     "<" / ">" /        ;  not appear in atext
-    //                     "[" / "]" /
-    //                     ":" / ";" /
-    //                     "@" / "\" /
-    //                     "," / "." /
-    //                     DQUOTE
-    auto ch(input());
-    if (std::string("()<>[]:;@\\,/\"").find(ch) != std::string::npos)
+
+    // 3.2.3.  Atom
+
+    bool ParseAText(void * = nullptr)
     {
-        output(ch);
-        return true;
+        // atext           =   ALPHA / DIGIT /    ; Printable US-ASCII
+        //                    "!" / "#" /        ;  characters not including
+        //                    "$" / "%" /        ;  specials.  Used for atoms.
+        //                    "&" / "'" /
+        //                    "*" / "+" /
+        //                    "-" / "/" /
+        //                    "=" / "?" /
+        //                    "^" / "_" /
+        //                    "`" / "{" /
+        //                    "|" / "}" /
+        //                    "~"
+        auto isAChar = [](auto ch)
+        {
+            if (ch >= 'a' && ch <= 'z')
+                return true;
+            if (ch >= 'A' && ch <= 'Z')
+                return true;
+            if (ch >= '0' && ch <= '9')
+                return true;
+            return std::string("!#$%&\'*+-/=?^_`{|}~").find(ch) != std::string::npos;
+        };
+        auto ch(this->input_());
+        if (isAChar(ch))
+        {
+            this->output_(ch);
+            return true;
+        }
+        this->input_.Back();
+        return false;
     }
-    input.Back();
-    return false;
-}
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseQText(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-   // qtext           =   %d33 /             ; Printable US-ASCII
-   //                     %d35-91 /          ;  characters not including
-   //                     %d93-126 /         ;  "\" or the quote character
-   //                     obs-qtext
+    bool ParseAtom(TextWithComm * atom = nullptr)
+    {
+        // atom            =   [CFWS] 1*atext [CFWS]
+        auto ioState(Save());
+        ParseCFWS(MEMBER_NOTNULL(atom, CommentBefore));
+        size_t c1 = this->output_.Pos();
+        if (ParseAtLeastOne(WRAP_PARSE(ParseAText)))
+        {
+            size_t c2 = this->output_.Pos();
+            ParseCFWS(MEMBER_NOTNULL(atom, CommentAfter));
+
+            if (atom)
+            {
+                atom->Content = std::make_pair(c1, c2);
+            }
+
+            return ioState.Success();
+        }
+        CLEAR_NOTNULL(atom);
+        return false;
+    }
+
+    bool ParseDotAtomText()
+    {
+        // dot-atom-text   =   1*atext *("." 1*atext)
+        if (ParseAtLeastOne(WRAP_PARSE(ParseAText)))
+        {
+            auto ioState(Save());
+            for (;;)
+            {
+                if (this->input_.GetIf('.'))
+                {
+                    this->output_('.');
+                    if (false == ParseAtLeastOne(WRAP_PARSE(ParseAText)))
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    return ioState.Success();
+                }
+            }
+        }
+
+        return false;
+    }
+
+    bool ParseDotAtom(TextWithComm * dotAtom = nullptr)
+    {
+        // dot-atom        =   [CFWS] dot-atom-text [CFWS]
+        auto ioState(Save());
+        ParseCFWS(MEMBER_NOTNULL(dotAtom, CommentBefore));
+        size_t c1 = this->output_.Pos();
+        if (ParseDotAtomText())
+        {
+            size_t c2 = this->output_.Pos();
+            ParseCFWS(MEMBER_NOTNULL(dotAtom, CommentAfter));
+
+            if (dotAtom)
+            {
+                dotAtom->Content = std::make_pair(c1, c2);
+            }
+
+            return ioState.Success();
+        }
+        CLEAR_NOTNULL(dotAtom);
+        return false;
+    }
+
+    bool ParseSpecials()
+    {
+        // specials        =   "(" / ")" /        ; Special characters that do
+        //                     "<" / ">" /        ;  not appear in atext
+        //                     "[" / "]" /
+        //                     ":" / ";" /
+        //                     "@" / "\" /
+        //                     "," / "." /
+        //                     DQUOTE
+        auto ch(this->input_());
+        if (std::string("()<>[]:;@\\,/\"").find(ch) != std::string::npos)
+        {
+            this->output_(ch);
+            return true;
+        }
+        this->input_.Back();
+        return false;
+    }
+
+    bool ParseQText()
+    {
+       // qtext           =   %d33 /             ; Printable US-ASCII
+       //                     %d35-91 /          ;  characters not including
+       //                     %d93-126 /         ;  "\" or the quote character
+       //                     obs-qtext
        
-    auto ch(input());
-    if (ch == 33 || (ch >= 35 && ch <= 91) || (ch >= 93 && ch <= 126))
-    {
-        output(ch);
-        return true;
-    }
-    input.Back();
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseQContent(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // qcontent        =   qtext / quoted-pair
-
-    return ParseQText(output, input) || ParseQuotedPair(output, input);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseQuotedString(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, TextWithComm * quotedString)
-{
-    // quoted-string   =   [CFWS]
-    //                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
-    //                     [CFWS]
-    auto ioState(SaveIOState(input, output));
-    ParseCFWS(output, input, MEMBER_NOTNULL(quotedString, CommentBefore));
-    if (input.GetIf('\"'))
-    {
-        output('\"');
-        size_t c1 = output.Pos();
-        do
+        auto ch(this->input_());
+        if (ch == 33 || (ch >= 35 && ch <= 91) || (ch >= 93 && ch <= 126))
         {
-            ParseFWS(output, input);
-        } while (ParseQContent(output, input));
-        size_t c2 = output.Pos();
-
-        if (input.GetIf('\"'))
-        {
-            output('\"');
-            ParseCFWS(output, input, MEMBER_NOTNULL(quotedString, CommentAfter));
-
-            if (quotedString)
-            {
-                quotedString->Content = std::make_pair(c1, c2);
-            }
-
-            return ioState.Success();
+            this->output_(ch);
+            return true;
         }
+        this->input_.Back();
+        return false;
     }
-    CLEAR_NOTNULL(quotedString);
-    return false;
-}
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseWord(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, TextWithComm * word)
-{
-    // word            =   atom / quoted-string
-    return ParseAtom(output, input, word) || ParseQuotedString(output, input, word);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParsePhrase(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, MultiTextWithComm * phrase)
-{
-    // phrase          =   1*word / obs-phrase
-    return ParseAtLeastOne(WRAP_PARSE(ParseWord), output, input, phrase);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseLocalPart(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, TextWithComm * localPart)
-{
-    // local-part      =   dot-atom / quoted-string / obs-local-part
-    return ParseDotAtom(output, input, localPart) || ParseQuotedString(output, input, localPart);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseDText(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input)
-{
-    // dtext           =  %d33-90 /          ; Printable US-ASCII
-    //                    %d94-126 /         ;  characters not including
-    //                    obs-dtext          ;  "[", "]", or "\"
-    auto ch(input());
-    if ((ch >= 33 && ch <= 90) || ch >= 94 || ch <= 126)
+    bool ParseQContent()
     {
-        output(ch);
-        return true;
+        // qcontent        =   qtext / quoted-pair
+
+        return ParseQText() || ParseQuotedPair();
     }
-    input.Back();
-    return false;
-}
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseDomainLiteral(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, TextWithComm * domainLiteral)
-{
-    // domain-literal  =   [CFWS] "[" *([FWS] dtext) [FWS] "]" [CFWS]
-    auto ioState(SaveIOState(input, output));
-    ParseCFWS(output, input, MEMBER_NOTNULL(domainLiteral, CommentBefore));
-    if (input.GetIf('['))
+    bool ParseQuotedString(TextWithComm * quotedString)
     {
-        size_t c1 = output.Pos();
-        output('[');
-        do
+        // quoted-string   =   [CFWS]
+        //                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
+        //                     [CFWS]
+        auto ioState(Save());
+        ParseCFWS(MEMBER_NOTNULL(quotedString, CommentBefore));
+        if (this->input_.GetIf('\"'))
         {
-            ParseFWS(output, input);
-        } while (ParseDText(output, input));
+            this->output_('\"');
+            size_t c1 = this->output_.Pos();
+            do
+            {
+                ParseFWS();
+            } while (ParseQContent());
+            size_t c2 = this->output_.Pos();
 
-        ParseFWS(output, input);
-        size_t c2 = output.Pos();
+            if (this->input_.GetIf('\"'))
+            {
+                this->output_('\"');
+                ParseCFWS(MEMBER_NOTNULL(quotedString, CommentAfter));
 
-        if (input.GetIf(']'))
+                if (quotedString)
+                {
+                    quotedString->Content = std::make_pair(c1, c2);
+                }
+
+                return ioState.Success();
+            }
+        }
+        CLEAR_NOTNULL(quotedString);
+        return false;
+    }
+
+    // 3.2.5.  Miscellaneous Tokens
+
+    bool ParseWord(TextWithComm * word)
+    {
+        // word            =   atom / quoted-string
+        return ParseAtom(word) || ParseQuotedString(word);
+    }
+
+    bool ParsePhrase(MultiTextWithComm * phrase)
+    {
+        // phrase          =   1*word / obs-phrase
+        return ParseAtLeastOne(WRAP_PARSE(ParseWord), phrase);
+    }
+
+    // 3.4.1.  Addr-Spec Specification
+
+    bool ParseLocalPart(TextWithComm * localPart)
+    {
+        // local-part      =   dot-atom / quoted-string / obs-local-part
+        return ParseDotAtom(localPart) || ParseQuotedString(localPart);
+    }
+
+    bool ParseDText()
+    {
+        // dtext           =  %d33-90 /          ; Printable US-ASCII
+        //                    %d94-126 /         ;  characters not including
+        //                    obs-dtext          ;  "[", "]", or "\"
+        auto ch(this->input_());
+        if ((ch >= 33 && ch <= 90) || ch >= 94 || ch <= 126)
         {
-            output(']');
-            ParseCFWS(output, input, MEMBER_NOTNULL(domainLiteral, CommentAfter));
+            this->output_(ch);
+            return true;
+        }
+        this->input_.Back();
+        return false;
+    }
+
+    bool ParseDomainLiteral(TextWithComm * domainLiteral)
+    {
+        // domain-literal  =   [CFWS] "[" *([FWS] dtext) [FWS] "]" [CFWS]
+        auto ioState(Save());
+        ParseCFWS(MEMBER_NOTNULL(domainLiteral, CommentBefore));
+        if (this->input_.GetIf('['))
+        {
+            size_t c1 = this->output_.Pos();
+            this->output_('[');
+            do
+            {
+                ParseFWS();
+            } while (ParseDText());
+
+            ParseFWS();
+            size_t c2 = this->output_.Pos();
+
+            if (this->input_.GetIf(']'))
+            {
+                this->output_(']');
+                ParseCFWS(MEMBER_NOTNULL(domainLiteral, CommentAfter));
             
-            if (domainLiteral)
-            {
-                domainLiteral->Content = std::make_pair(c1, c2);
-            }
+                if (domainLiteral)
+                {
+                    domainLiteral->Content = std::make_pair(c1, c2);
+                }
 
+                return ioState.Success();
+            }
+        }
+
+        CLEAR_NOTNULL(domainLiteral);
+        return false;
+    }
+
+    bool ParseDomain(TextWithComm * domain)
+    {
+        // domain          =   dot-atom / domain-literal / obs-domain
+        return ParseDotAtom(domain) || ParseDomainLiteral(domain);
+    }
+
+    bool ParseAddrSpec(AddrSpec * addrSpec)
+    {
+        // addr-spec       =   local-part "@" domain
+        auto ioState(Save());
+        if (ParseLocalPart(MEMBER_NOTNULL(addrSpec, LocalPart)))
+        {
+            if (this->input_.GetIf('@'))
+            {
+                this->output_('@');
+                if (ParseDomain(MEMBER_NOTNULL(addrSpec, DomainPart)))
+                {
+                    return ioState.Success();
+                }
+            }
+        }
+        CLEAR_NOTNULL(addrSpec);
+        return false;
+    }
+
+    // 3.4.  Address Specification
+
+    bool ParseAngleAddr(AngleAddr * angleAddr)
+    {
+        // angle-addr      =   [CFWS] "<" addr-spec ">" [CFWS] /
+        //                 obs-angle-addr
+        auto ioState(Save());
+        ParseCFWS(MEMBER_NOTNULL(angleAddr, CommentBefore));
+        if (this->input_.GetIf('<'))
+        {
+            this->output_('<');
+            if (ParseAddrSpec(MEMBER_NOTNULL(angleAddr, Content)))
+            {
+                if (this->input_.GetIf('>'))
+                {
+                    this->output_('>');
+                    ParseCFWS(MEMBER_NOTNULL(angleAddr, CommentAfter));
+
+                    return ioState.Success();
+                }
+            }
+        }
+        CLEAR_NOTNULL(angleAddr);
+        return false;
+    }
+
+    bool ParseDisplayName(MultiTextWithComm * displayName)
+    {
+        // display-name    =   phrase
+        return ParsePhrase(displayName);
+    }
+
+    bool ParseNameAddr(Mailbox * nameAddr)
+    {
+        // name-addr       =   [display-name] angle-addr
+        auto ioState(Save());
+        ParseDisplayName(MEMBER_NOTNULL(nameAddr, DisplayName));
+        if (ParseAngleAddr(MEMBER_NOTNULL(nameAddr, Address)))
+        {
             return ioState.Success();
         }
+        CLEAR_NOTNULL(nameAddr);
+        return false;
     }
 
-    CLEAR_NOTNULL(domainLiteral);
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseDomain(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, TextWithComm * domain)
-{
-    // domain          =   dot-atom / domain-literal / obs-domain
-    return ParseDotAtom(output, input, domain) || ParseDomainLiteral(output, input, domain);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseAddrSpec(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, AddrSpec * addrSpec)
-{
-    // addr-spec       =   local-part "@" domain
-    auto ioState(SaveIOState(input, output));
-    if (ParseLocalPart(output, input, MEMBER_NOTNULL(addrSpec, LocalPart)))
+    bool ParseMailbox(Mailbox * mailbox)
     {
-        if (input.GetIf('@'))
+        // mailbox         =   name-addr / addr-spec
+        return ParseNameAddr(mailbox) || ParseAddrSpec(MEMBER_NOTNULL(mailbox, Address.Content));
+    }
+
+    bool ParseMailboxList(MailboxList * mailboxList)
+    {
+        // mailbox-list    =   (mailbox *("," mailbox)) / obs-mbox-list
+        return ParseList(WRAP_PARSE(ParseMailbox), mailboxList);
+    }
+
+    bool ParseAddress(Address * address);
+
+    bool ParseAddressList(AddressList * addresses)
+    {
+        // address-list    =   (address *("," address)) / obs-addr-list
+        return ParseList(WRAP_PARSE(ParseAddress), addresses);
+    }
+
+    bool ParseGroupList(Group * group)
+    {
+        // group-list      =   mailbox-list / CFWS / obs-group-list
+        return ParseMailboxList(MEMBER_NOTNULL(group, Members)) || ParseCFWS(MEMBER_NOTNULL(group, Comment));
+    }
+
+    bool ParseGroup(Group * group)
+    {
+        // group           =   display-name ":" [group-list] ";" [CFWS]
+        auto ioState(Save());
+        if (ParseDisplayName(MEMBER_NOTNULL(group, DisplayName)))
         {
-            output('@');
-            if (ParseDomain(output, input, MEMBER_NOTNULL(addrSpec, DomainPart)))
+            if (this->input_.GetIf(':'))
             {
-                return ioState.Success();
+                this->output_(':');
+                ParseGroupList(group);
+                if (this->input_.GetIf(';'))
+                {
+                    this->output_(';');
+                    ParseCFWS(MEMBER_NOTNULL(group, Comment));
+                    return ioState.Success();
+                }
             }
         }
+
+        CLEAR_NOTNULL(group);
+        return false;
     }
-    CLEAR_NOTNULL(addrSpec);
-    return false;
-}
+};
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseAngleAddr(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, AngleAddr * angleAddr)
+template <typename INPUT, typename CHAR_TYPE>
+bool ParserRFC5322<INPUT, CHAR_TYPE>::ParseCContent()
 {
-    // angle-addr      =   [CFWS] "<" addr-spec ">" [CFWS] /
-    //                 obs-angle-addr
-    auto ioState(SaveIOState(input, output));
-    ParseCFWS(output, input, MEMBER_NOTNULL(angleAddr, CommentBefore));
-    if (input.GetIf('<'))
-    {
-        output('<');
-        if (ParseAddrSpec(output, input, MEMBER_NOTNULL(angleAddr, Content)))
-        {
-            if (input.GetIf('>'))
-            {
-                output('>');
-                ParseCFWS(output, input, MEMBER_NOTNULL(angleAddr, CommentAfter));
-
-                return ioState.Success();
-            }
-        }
-    }
-    CLEAR_NOTNULL(angleAddr);
-    return false;
+    // ccontent        =   ctext / quoted-pair / comment
+    return ParseCText() || ParseQuotedPair() || ParseComment();
 }
 
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseDisplayName(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, MultiTextWithComm * displayName)
-{
-    // display-name    =   phrase
-    return ParsePhrase(output, input, displayName);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseNameAddr(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, Mailbox * nameAddr)
-{
-    // name-addr       =   [display-name] angle-addr
-    auto ioState(SaveIOState(input, output));
-    ParseDisplayName(output, input, MEMBER_NOTNULL(nameAddr, DisplayName));
-    if (ParseAngleAddr(output, input, MEMBER_NOTNULL(nameAddr, Address)))
-    {
-        return ioState.Success();
-    }
-    CLEAR_NOTNULL(nameAddr);
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseMailbox(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, Mailbox * mailbox)
-{
-    // mailbox         =   name-addr / addr-spec
-    return ParseNameAddr(output, input, mailbox) || ParseAddrSpec(output, input, MEMBER_NOTNULL(mailbox, Address.Content));
-}
-
-template <typename PARSER, typename CHAR_TYPE, typename INPUT, typename ELEM>
-bool ParseList(PARSER && parser, OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, std::vector<ELEM> * list)
-{
-    // X-list    =   (X *("," X))
-    auto ioState(SaveIOState(input, output));
-    for (;;)
-    {
-        ELEM elem;
-        if (parser(output, input, &elem) == false)
-        {
-            CLEAR_NOTNULL(list);
-            return false;
-        }
-
-        if (list)
-            list->push_back(elem);
-
-        if (input.GetIf(','))
-        {
-            continue;
-        }
-        return ioState.Success();
-    }
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseMailboxList(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, MailboxList * mailboxList)
-{
-    // mailbox-list    =   (mailbox *("," mailbox)) / obs-mbox-list
-    return ParseList(WRAP_PARSE(ParseMailbox), output, input, mailboxList);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseAddress(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input);
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseAddressList(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, AddressList * addresses)
-{
-    // address-list    =   (address *("," address)) / obs-addr-list
-    return ParseList(WRAP_PARSE(ParseAddress), output, input, addresses);
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseGroupList(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, Group * group)
-{
-    // group-list      =   mailbox-list / CFWS / obs-group-list
-    return ParseMailboxList(output, input, MEMBER_NOTNULL(group, Members)) || ParseCFWS(output, input, MEMBER_NOTNULL(group, Comment));
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseGroup(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, Group * group)
-{
-    // group           =   display-name ":" [group-list] ";" [CFWS]
-    auto ioState(SaveIOState(input, output));
-    if (ParseDisplayName(output, input, MEMBER_NOTNULL(group, DisplayName)))
-    {
-        if (input.GetIf(':'))
-        {
-            output(':');
-            ParseGroupList(output, input, group);
-            if (input.GetIf(';'))
-            {
-                output(';');
-                ParseCFWS(output, input, MEMBER_NOTNULL(group, Comment));
-                return ioState.Success();
-            }
-        }
-    }
-
-    CLEAR_NOTNULL(group);
-    return false;
-}
-
-template <typename CHAR_TYPE, typename INPUT>
-bool ParseAddress(OutputAdapter<CHAR_TYPE> & output, InputAdapter<INPUT> & input, Address * address)
+template <typename INPUT, typename CHAR_TYPE>
+bool ParserRFC5322<INPUT, CHAR_TYPE>::ParseAddress(Address * address)
 {
     // address         =   mailbox / group
-    return ParseMailbox(output, input, MEMBER_NOTNULL(address, Mailbox)) || ParseGroup(output, input, MEMBER_NOTNULL(address, Group));
+    return ParseMailbox(MEMBER_NOTNULL(address, Mailbox)) || ParseGroup(MEMBER_NOTNULL(address, Group));
+}
+
+template <typename INPUT, typename CHAR_TYPE>
+ParserRFC5322<INPUT, CHAR_TYPE> Make_ParserRFC5322(INPUT && input, CHAR_TYPE charType)
+{
+    return ParserRFC5322<INPUT, CHAR_TYPE>(input);
 }
 
 #include <iostream>
@@ -852,12 +877,13 @@ void test_address(std::string const & addr)
 {
     std::stringstream some_address(addr);
     std::cout << addr;
-    OutputAdapter<char> output;
-    auto input(Make_InputAdapter([&] { return some_address.get(); }));
+
+    auto parser(Make_ParserRFC5322([&] { return some_address.get(); }, (char)0));
 
     AddressList addresses;
-    if (ParseAddressList(output, input, &addresses) && some_address.get() == EOF)
+    if (parser.ParseAddressList(&addresses) && some_address.get() == EOF)
     {
+        auto const & outBuffer = parser.OutputBuffer();
         std::cout << " is OK\n";
         std::cout << addresses.size() << " address" << (addresses.size() > 1 ? "es" : "") << " parsed." << std::endl;
         for (auto const & address : addresses)
@@ -865,10 +891,10 @@ void test_address(std::string const & addr)
             auto displayMailBox = [&](auto const & mailbox, auto indent)
             {
                 std::cout << indent << "   Mailbox:" << std::endl;
-                std::cout << indent << "     Display Name: '" << ToString(output.Buffer(), true, mailbox.DisplayName) << "'" << std::endl;
+                std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, mailbox.DisplayName) << "'" << std::endl;
                 std::cout << indent << "     Adress: " <<std::endl;
-                std::cout << indent << "       Local-Part: '" << ToString(output.Buffer(), false, mailbox.Address.Content.LocalPart) << "'" << std::endl;
-                std::cout << indent << "       Domain-Part: '" << ToString(output.Buffer(), false, mailbox.Address.Content.DomainPart) << "'" << std::endl;
+                std::cout << indent << "       Local-Part: '" << ToString(outBuffer, false, mailbox.Address.Content.LocalPart) << "'" << std::endl;
+                std::cout << indent << "       Domain-Part: '" << ToString(outBuffer, false, mailbox.Address.Content.DomainPart) << "'" << std::endl;
             };
 
             if (false == IsEmpty(address.Mailbox))
@@ -878,7 +904,7 @@ void test_address(std::string const & addr)
             else
             {
                 std::cout << "   Group:" << std::endl;
-                std::cout << "     Display Name: '" << ToString(output.Buffer(), false, address.Group.DisplayName) << "'" << std::endl;
+                std::cout << "     Display Name: '" << ToString(outBuffer, false, address.Group.DisplayName) << "'" << std::endl;
                 std::cout << "     Members:" << std::endl;
                 for (auto const & groupAddr : address.Group.Members)
                 {
