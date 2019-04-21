@@ -979,11 +979,11 @@ public:
         //                 obs-angle-addr
         return ParseSequenceFields(angleAddr,
             std::index_sequence<AngleAddrFields_CommentBefore, SIZE_MAX, AngleAddrFields_Content, SIZE_MAX, AngleAddrFields_CommentAfter>(),
-            THIS_PARSE(ParseCFWS),
+            THIS_PARSE_ARGS(ParseOptional, THIS_PARSE(ParseCFWS)),
             THIS_PARSE_ARGS(ParseCharExact, '<', true),
             THIS_PARSE(ParseAddrSpec),
             THIS_PARSE_ARGS(ParseCharExact, '>', true),
-            THIS_PARSE(ParseCFWS));
+            THIS_PARSE_ARGS(ParseOptional, THIS_PARSE(ParseCFWS)));
     }
 
     bool ParseDisplayName(MultiTextWithComm * displayName)
@@ -1114,6 +1114,9 @@ void test_address(std::string const & addr)
 
 int main()
 {
+    test_address("arobar     d <sigma@addr.net>");
+    test_address("troll@bitch.com");
+    test_address("troll@bitch.com, arobar     d <sigma@addr.net>, sir john snow <user.name+tag+sorting@example.com(comment)>");
     test_address("display <simple@example.com>");
 
     test_address("A@b@c@example.com");
@@ -1125,7 +1128,6 @@ int main()
     test_address("other.email-with-hyphen@example.com");
     test_address("fully-qualified-domain@example.com");
     test_address("user.name+tag+sorting@example.com");
-    test_address("troll@bitch.com, arobar     d <sigma@addr.net>, sir john snow <user.name+tag+sorting@example.com(comment)>");
     test_address("x@example.com");
     test_address("example-indeed@strange-example.com");
     test_address("admin@mailserver1");
