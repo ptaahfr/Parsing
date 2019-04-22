@@ -148,6 +148,7 @@
   <ItemGroup>
     <ClInclude Include="ParserBase.hpp" />
     <ClInclude Include="ParserCore.hpp" />
+    <ClInclude Include="ParserRFC5234.hpp" />
     <ClInclude Include="ParserRFC5322Data.hpp" />
     <ClInclude Include="ParserRFC5322Rules.hpp" />
   </ItemGroup>
