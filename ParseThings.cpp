@@ -927,7 +927,7 @@ public:
         //                    %d94-126 /         ;  characters not including
         //                    obs-dtext          ;  "[", "]", or "\"
         auto ch(this->input_());
-        if ((ch >= 33 && ch <= 90) || ch >= 94 || ch <= 126)
+        if ((ch >= 33 && ch <= 90) || ch >= 94 && ch <= 126)
         {
             this->output_(ch);
             return true;
