@@ -21,7 +21,7 @@ void easy_test(std::string const & addr)
 {
     std::string input = "<mail@(toto)toto.org(tata)>";
 
-    auto parser(Make_ParserRFC5322([&, pos = (size_t)0] () mutable
+    auto parser(Make_Parser([&, pos = (size_t)0] () mutable
     {
         if (pos < input.size())
             return (int)input[pos++];
@@ -32,7 +32,7 @@ void easy_test(std::string const & addr)
     //parser.Parse(&result, DotAtom);
 
     AddressData result;
-    parser.Parse(&result, Address);
+    RFC5322::Parse(parser, &result);
 
     //AddressListData result2;
     //parser.Parse(&result2, AddressList);
@@ -43,7 +43,7 @@ void test_address(std::string const & addr)
 {
     std::cout << addr;
 
-    auto parser(Make_ParserRFC5322([&, pos = (size_t)0] () mutable
+    auto parser(Make_Parser([&, pos = (size_t)0] () mutable
     {
         if (pos < addr.size())
             return (int)addr[pos++];
@@ -51,7 +51,7 @@ void test_address(std::string const & addr)
     }, (char)0));
 
     AddressListData addresses;
-    if (parser.Parse(&addresses, AddressList) && parser.Ended())
+    if (RFC5322::Parse(parser, &addresses) && parser.Ended())
     {
         auto const & outBuffer = parser.OutputBuffer();
         std::cout << " is OK\n";
