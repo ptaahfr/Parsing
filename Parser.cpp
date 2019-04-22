@@ -1,5 +1,7 @@
+// (c) 2019 ptaahfr http://github.com/ptaahfr
+// All right reserved, for educational purposes
+//
 // test parsing code for email adresses based on RFC 5322 & 5234
-// (c) Ptaah
 
 #ifdef _MSC_VER
 #pragma warning(disable: 4503)

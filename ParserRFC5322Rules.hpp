@@ -1,3 +1,9 @@
+// (c) 2019 ptaahfr http://github.com/ptaahfr
+// All right reserved, for educational purposes
+//
+// test parsing code for email adresses based on RFC 5322 & 5234
+//
+// rules definitions for the email address parsing
 #pragma once
 
 #include "ParserCore.hpp"
