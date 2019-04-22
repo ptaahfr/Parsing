@@ -15,30 +15,6 @@
 
 #include <iostream>
 
-//#define EASY_TEST
-
-void easy_test(std::string const & addr)
-{
-    std::string input = "<mail@(toto)toto.org(tata)>";
-
-    auto parser(Make_Parser([&, pos = (size_t)0] () mutable
-    {
-        if (pos < input.size())
-            return (int)input[pos++];
-        return EOF;
-    }, (char)0));
-
-    //TextWithCommData result;
-    //parser.Parse(&result, DotAtom);
-
-    AddressData result;
-    RFC5322::Parse(parser, &result);
-
-    //AddressListData result2;
-    //parser.Parse(&result2, AddressList);
-}
-
-#ifndef EASY_TEST
 void test_address(std::string const & addr)
 {
     std::cout << addr;
@@ -50,8 +26,10 @@ void test_address(std::string const & addr)
         return EOF;
     }, (char)0));
 
+    using namespace RFC5322;
+
     AddressListData addresses;
-    if (RFC5322::Parse(parser, &addresses) && parser.Ended())
+    if (Parse(parser, &addresses) && parser.Ended())
     {
         auto const & outBuffer = parser.OutputBuffer();
         std::cout << " is OK\n";
@@ -70,8 +48,9 @@ void test_address(std::string const & addr)
                 std::cout << indent << "   Mailbox:" << std::endl;
                 if (IsEmpty(std::get<MailboxFields_AddrSpec>(mailbox)))
                 {
-                    std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, std::get<NameAddrFields_DisplayName>(std::get<MailboxFields_NameAddr>(mailbox))) << std::endl;
-                    displayAddress(std::get<AngleAddrFields_Content>(std::get<NameAddrFields_Address>(std::get<MailboxFields_NameAddr>(mailbox))), indent);
+                    auto const & nameAddrData = std::get<MailboxFields_NameAddr>(mailbox);
+                    std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, std::get<NameAddrFields_DisplayName>(nameAddrData)) << std::endl;
+                    displayAddress(std::get<AngleAddrFields_Content>(std::get<NameAddrFields_Address>(nameAddrData)), indent);
                 }
                 else
                 {
@@ -103,13 +82,9 @@ void test_address(std::string const & addr)
 
     std::cout << std::endl;
 }
-#endif
 
 int main()
 {
-#ifdef EASY_TEST
-    easy_test("toto.org");
-#else
     test_address("troll@bitch.com, arobar     d <sigma@addr.net>, sir john snow <user.name+tag+sorting@example.com(comment)>");
     test_address("arobar     d <sigma@addr.net>");
     test_address("troll@bitch.com");
@@ -138,6 +113,6 @@ int main()
     test_address("this is\"not\\allowed@example.com");
     test_address("this\\ still\\\"not\\\\allowed@example.com");
     test_address("1234567890123456789012345678901234567890123456789012345678901234+x@example.com");
-#endif
+
     return 0;
 }

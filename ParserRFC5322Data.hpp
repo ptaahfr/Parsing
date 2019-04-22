@@ -96,4 +96,3 @@ std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, boo
     }
     return result;
 }
-
