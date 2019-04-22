@@ -9,7 +9,7 @@ static auto const VCHAR = CharPred([](auto ch) { return ch >= 0x10 && ch <= 0x7e
 // WSP            =  SP / HTAB
 static auto const WSP = CharPred([](auto ch) { return ch == ' ' || ch == '\t'; });
 // CRLF           =  CR LF
-DECLARE_PARSER_PRIMITIVE(CRLF)
+PARSER_CUSTOM_PRIMITIVE(CRLF)
 
 template <typename INPUT, typename CHAR_TYPE = char>
 class ParserCore : public ParserBase<INPUT, CHAR_TYPE>

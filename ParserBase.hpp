@@ -106,6 +106,8 @@ public:
     }
 };
 
+using SubstringPos = std::pair<size_t, size_t>;
+
 template <size_t INDEX, typename TYPE_PTR, std::enable_if_t<(INDEX != INDEX_THIS && INDEX != INDEX_NONE), void *> = nullptr>
 auto FieldNotNull(TYPE_PTR type) -> decltype(&std::get<INDEX>(*type))
 {
@@ -124,6 +126,12 @@ TYPE * FieldNotNull(TYPE * type)
 
 template <size_t INDEX, typename TYPE_PTR, std::enable_if_t<(INDEX == INDEX_NONE), void *> = nullptr>
 nullptr_t FieldNotNull(TYPE_PTR type)
+{
+    return nullptr;
+}
+
+template <size_t INDEX>
+nullptr_t FieldNotNull(SubstringPos * type)
 {
     return nullptr;
 }
@@ -157,6 +165,11 @@ void PushBackIfNotNull(std::vector<ELEM> * elems, ELEM const & elem)
 }
 
 template <typename ELEM>
+void PushBackIfNotNull(SubstringPos *, ELEM const &)
+{
+}
+
+template <typename ELEM>
 void PushBackIfNotNull(nullptr_t, ELEM const &)
 {
 }
@@ -168,6 +181,10 @@ void ResizeIfNotNull(std::vector<ELEM> * elems, size_t newSize)
     {
         elems->resize(newSize);
     }
+}
+
+void ResizeIfNotNull(SubstringPos *, size_t newSize)
+{
 }
 
 void ResizeIfNotNull(nullptr_t, size_t newSize)
@@ -184,6 +201,11 @@ size_t GetSizeIfNotNull(std::vector<ELEM> const * elems)
     return 0;
 }
 
+size_t GetSizeIfNotNull(SubstringPos *)
+{
+    return 0;
+}
+
 size_t GetSizeIfNotNull(nullptr_t)
 {
     return 0;
@@ -192,19 +214,8 @@ size_t GetSizeIfNotNull(nullptr_t)
 template <typename ELEM>
 ELEM ElemTypeOrNull(std::vector<ELEM> const *);
 
-nullptr_t ElemTypeOrNull(nullptr_t = nullptr);
-
-template <size_t S1, size_t S2, typename PTR, std::enable_if_t<S1 == S2, void *> = nullptr>
-PTR NonNullIfEqual(PTR ptr)
-{
-    return ptr;
-}
-
-template <size_t S1, size_t S2, typename PTR, std::enable_if_t<S1 != S2, void *> = nullptr>
-nullptr_t NonNullIfEqual(PTR ptr)
-{
-    return nullptr;
-}
+nullptr_t ElemTypeOrNull(nullptr_t);
+nullptr_t ElemTypeOrNull(SubstringPos *);
 
 template <typename ELEM>
 ELEM * PtrOrNull(ELEM & e)
@@ -224,7 +235,7 @@ nullptr_t PtrOrNull(nullptr_t = nullptr)
 #define THIS_PARSE_ARGS(X, ...) [&] (auto elem) { return this->X(elem, __VA_ARGS__); }
 #define PARSE(...) [&] (auto elem) { return this->Parse(elem, __VA_ARGS__); }
 
-#define DECLARE_PARSER_PRIMITIVE_T1(name, t1) \
+#define PARSER_CUSTOM_PRIMITIVE_T1(name, t1) \
     template <typename t1> \
     class name##Type : public std::tuple<t1> \
     { \
@@ -237,11 +248,11 @@ nullptr_t PtrOrNull(nullptr_t = nullptr)
         return name##Type<t1>(arg); \
     };
 
-#define DECLARE_PARSER_PRIMITIVE(name) \
+#define PARSER_CUSTOM_PRIMITIVE(name) \
     class name##Type { } name;
 
-DECLARE_PARSER_PRIMITIVE_T1(CharPred, PREDICATE)
-DECLARE_PARSER_PRIMITIVE_T1(CharExact, CHAR_TYPE)
+PARSER_CUSTOM_PRIMITIVE_T1(CharPred, PREDICATE)
+PARSER_CUSTOM_PRIMITIVE_T1(CharExact, CHAR_TYPE)
 
 template <typename IS_ALT, typename... PRIMITIVES>
 class SequenceType : public std::tuple<PRIMITIVES...>
@@ -307,6 +318,12 @@ RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> Repeat(PRIMITIVE primitive)
     return RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE>(primitive);
 }
 
+template <size_t MIN_COUNT = 0, size_t MAX_COUNT = SIZE_MAX, typename PRIMITIVE, typename... OTHER_PRIMITIVES>
+RepeatType<MIN_COUNT, MAX_COUNT, SequenceType<std::false_type, PRIMITIVE, OTHER_PRIMITIVES...> > Repeat(PRIMITIVE primitive, OTHER_PRIMITIVES... otherPrimitives)
+{
+    return Repeat<MIN_COUNT, MAX_COUNT>(Sequence(primitive, otherPrimitives...));
+}
+
 template <typename PRIMITIVE>
 class OptionalType
 {
@@ -325,6 +342,12 @@ template <typename PRIMITIVE>
 OptionalType<PRIMITIVE> Optional(PRIMITIVE primitive)
 {
     return OptionalType<PRIMITIVE>(primitive);
+}
+
+template <typename PRIMITIVE, typename... OTHER_PRIMITIVES>
+OptionalType<SequenceType<std::false_type, PRIMITIVE, OTHER_PRIMITIVES...> > Optional(PRIMITIVE primitive, OTHER_PRIMITIVES... otherPrimitives)
+{
+    return Optional(Sequence(primitive, otherPrimitives...));
 }
 
 template <typename PRIMITIVE>
@@ -363,15 +386,27 @@ public:
     auto const & OutputBuffer() const { return output_.Buffer(); }
     bool Ended() { return input_() == EOF; }
 protected:
+    template <typename RESULT_PTR>
     class SavedIOState
     {
         InputAdapter<INPUT> & input_;
         OutputAdapter<CHAR_TYPE> & output_;
         size_t inputPos_;
         size_t outputPos_;
+        RESULT_PTR result_;
+
+        template <typename RESULT2_PTR>
+        static void SetResult(RESULT2_PTR result, SubstringPos newResult)
+        {
+        }
+
+        static void SetResult(SubstringPos * result, SubstringPos newResult)
+        {
+            *result = newResult;
+        }
     public:
-        SavedIOState(InputAdapter<INPUT> & input, OutputAdapter<CHAR_TYPE> & output)
-            : input_(input), output_(output), inputPos_(input.Pos()), outputPos_(output.Pos())
+        SavedIOState(InputAdapter<INPUT> & input, OutputAdapter<CHAR_TYPE> & output, RESULT_PTR result)
+            : input_(input), output_(output), inputPos_(input.Pos()), outputPos_(output.Pos()), result_(result)
         {
         }
 
@@ -389,53 +424,19 @@ protected:
 
         bool Success()
         {
+            SetResult(result_, SubstringPos(outputPos_, output_.Pos()));
             inputPos_ = (size_t)-1;
             outputPos_ = (size_t)-1;
             return true;
         }
     };
 
-    SavedIOState Save()
+    template <typename RESULT_PTR>
+    SavedIOState<RESULT_PTR> Save(RESULT_PTR result)
     {
-        return SavedIOState(input_, output_);
+        return SavedIOState<RESULT_PTR>(input_, output_, result);
     }
 
-    template <typename ELEMS_PTR, typename PARSER>
-    bool ParseRepeat(ELEMS_PTR elems, PARSER parser, size_t minCount = 0, size_t maxCount = SIZE_MAX)
-    {
-        size_t count = 0;
-        size_t prevSize = GetSizeIfNotNull(elems);
-
-        auto ioState(this->Save());
-
-        for (; count < maxCount; ++count)
-        {
-            decltype(ElemTypeOrNull(elems)) elem = {};
-            if (parser(PtrOrNull(elem)))
-            {
-                PushBackIfNotNull(elems, elem);
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        if (count < minCount)
-        {
-            ResizeIfNotNull(elems, prevSize);
-            return false;
-        }
-
-        return ioState.Success();
-    }
-
-    template <typename ELEM_PTR, typename PARSER>
-    bool ParseOptional(ELEM_PTR elem, PARSER parser)
-    {
-        return parser(elem) || true;
-    }
-    
     template <typename PREDICATE>
     bool Parse(nullptr_t, CharPredType<PREDICATE> const & what)
     {
@@ -481,7 +482,7 @@ private:
     {
         enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(PRIMITIVES) - 1) };
 
-        if (that.Parse(FIELD_NOTNULL(dest, OFFSET), std::get<OFFSET>(what)))
+        if (that.Parse(FIELD_NOTNULL(dest, INDEX_THIS), std::get<OFFSET>(what)))
             return true;
 
         if (OFFSET < NEXT_OFFSET)
@@ -495,7 +496,7 @@ protected:
     template <typename THAT, typename DEST_PTR, typename IS_ALT, typename... PRIMITIVES>
     static bool Parse(THAT & that, DEST_PTR dest, SequenceType<IS_ALT, PRIMITIVES...> const & what)
     {
-        auto ioState(that.Save());
+        auto ioState(that.Save(dest));
         if (ParseItem<0>(that, dest, what))
         {
             return ioState.Success();
@@ -537,7 +538,7 @@ protected:
     template <typename PARSER, typename DEST_PTR, typename IS_ALT, typename INDEX_SEQUENCE, typename... PRIMITIVES>
     static bool Parse(PARSER & parser, DEST_PTR dest, IndexedSequenceType<IS_ALT, INDEX_SEQUENCE, PRIMITIVES...> const & what)
     {
-        auto ioState(parser.Save());
+        auto ioState(parser.Save(dest));
         if (ParseItem<0>(parser, dest, INDEX_SEQUENCE(), what))
         {
             return ioState.Success();
@@ -552,7 +553,7 @@ protected:
         size_t count = 0;
         size_t prevSize = GetSizeIfNotNull(elems);
 
-        auto ioState(parser.Save());
+        auto ioState(parser.Save(elems));
 
         for (; count < MAX_COUNT; ++count)
         {
@@ -581,7 +582,7 @@ protected:
     {
         size_t prevSize = GetSizeIfNotNull(elems);
 
-        auto ioState(parser.Save());
+        auto ioState(parser.Save(elems));
 
         decltype(ElemTypeOrNull(elems)) elem = {};
         if (parser.Parse(PtrOrNull(elem), what.Primitive()))
@@ -601,8 +602,6 @@ protected:
         return parser.Parse(elems, what.Primitive()) || true;
     }
 };
-
-using SubstringPos = std::pair<size_t, size_t>;
 
 template <typename CHAR_TYPE>
 std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, SubstringPos subString)

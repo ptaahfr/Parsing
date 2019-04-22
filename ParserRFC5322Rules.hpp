@@ -68,39 +68,109 @@ static auto const Specials = CharPred([](auto ch)
 //                     obs-qtext
 static auto const QText = CharPred([](auto ch) { return ch == 33 || (ch >= 35 && ch <= 91) || (ch >= 93 && ch <= 126); });
 
-DECLARE_PARSER_PRIMITIVE(FWS)
-DECLARE_PARSER_PRIMITIVE(QuotedPair)
-DECLARE_PARSER_PRIMITIVE(CContent)
-DECLARE_PARSER_PRIMITIVE(Comment)
-DECLARE_PARSER_PRIMITIVE(CFWS)
-DECLARE_PARSER_PRIMITIVE(Atom)
-DECLARE_PARSER_PRIMITIVE(DotAtomText)
-DECLARE_PARSER_PRIMITIVE(DotAtom)
-DECLARE_PARSER_PRIMITIVE(QContent)
-DECLARE_PARSER_PRIMITIVE(QuotedString)
-DECLARE_PARSER_PRIMITIVE(Word)
-DECLARE_PARSER_PRIMITIVE(Phrase)
-DECLARE_PARSER_PRIMITIVE(LocalPart)
-DECLARE_PARSER_PRIMITIVE(DomainLiteral)
-DECLARE_PARSER_PRIMITIVE(Domain)
-DECLARE_PARSER_PRIMITIVE(AddrSpec)
-DECLARE_PARSER_PRIMITIVE(AngleAddr)
-DECLARE_PARSER_PRIMITIVE(NameAddr)
-DECLARE_PARSER_PRIMITIVE(DomainAddr)
-DECLARE_PARSER_PRIMITIVE(Mailbox)
-DECLARE_PARSER_PRIMITIVE(MailboxList)
-DECLARE_PARSER_PRIMITIVE(Group)
-DECLARE_PARSER_PRIMITIVE(GroupList)
-DECLARE_PARSER_PRIMITIVE(Address)
-DECLARE_PARSER_PRIMITIVE(AddressList)
+// 3.2.2.  Folding White Space and Comments
+
+// FWS             =   ([*WSP CRLF] 1*WSP) /  obs-FWS
+static auto const FWS = Sequence(Optional(Repeat(WSP), CRLF), Repeat<1>(WSP));
+
+// quoted-pair     = ("\" (VCHAR / WSP))
+static auto const QuotedPair = Sequence(CharExact('\\'), Alternatives(VCHAR, WSP));
+
+// We are forced to declare a custom primitive for CContent because of circular reference
+PARSER_CUSTOM_PRIMITIVE(CContent)
+
+// comment         =   "(" *([FWS] ccontent) [FWS] ")"
+static auto const Comment = Sequence(CharExact('('), Repeat(Optional(FWS), CContent), Optional(FWS), CharExact(')'));
+
+// CFWS            =   (1*([FWS] comment) [FWS]) / FWS
+static auto const CFWS = Alternatives(Repeat<1>(Optional(FWS), Comment), Optional(FWS), FWS);
+
+// atom            =   [CFWS] 1*atext [CFWS]
+static auto const Atom = Sequence(Optional(CFWS), Repeat<1>(AText), Optional(CFWS));
+
+// dot-atom-text   =   1*atext *("." 1*atext)
+static auto const DotAtomText = Sequence(Repeat<1>(AText), Repeat(CharExact('.'), Repeat<1>(AText)));
+
+// dot-atom        =   [CFWS] dot-atom-text [CFWS]
+static auto const DotAtom = Sequence(Optional(CFWS), DotAtomText, Optional(CFWS));
+
+// qcontent        =   qtext / quoted-pair
+static auto const QContent = Alternatives(QText, QuotedPair);
+
+// quoted-string   =   [CFWS]
+//                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
+//                     [CFWS]
+static auto const QuotedString = IndexedSequence(
+    std::index_sequence<TextWithCommFields_CommentBefore, INDEX_NONE, TextWithCommFields_CommentBefore, INDEX_NONE, TextWithCommFields_CommentAfter>(),
+    Optional(CFWS), CharExact('\"'), Sequence(Repeat(Optional(FWS), QContent), Optional(FWS)), CharExact('\"'), Optional(CFWS));
+
+// 3.2.5.  Miscellaneous Tokens
+
+// word            =   atom / quoted-string
+static auto const Word = Alternatives(Atom, QuotedString);
+
+// phrase          =   1*word / obs-phrase
+static auto const Phrase = Repeat<1>(Word);
 
 // display-name    =   phrase
 static auto const DisplayName = Phrase;
 
-// Temporary primitives
-DECLARE_PARSER_PRIMITIVE(SeqOptFWSDText)
-DECLARE_PARSER_PRIMITIVE(SeqOptFWSQContent)
-DECLARE_PARSER_PRIMITIVE(OptFWS)
+// 3.4.1.  Addr-Spec Specification
+
+// local-part      =   dot-atom / quoted-string / obs-local-part
+static auto const LocalPart = Alternatives(DotAtom, QuotedString);
+
+// domain-literal  =   [CFWS] "[" *([FWS] dtext) [FWS] "]" [CFWS]
+static auto const DomainLiteral = IndexedSequence(
+    std::index_sequence<TextWithCommFields_CommentBefore, INDEX_NONE, TextWithCommFields_CommentBefore, INDEX_NONE, TextWithCommFields_CommentAfter>(),
+    Optional(CFWS), CharExact('['), Sequence(Repeat(Optional(FWS), DText), Optional(FWS)), CharExact(']'), Optional(CFWS));
+
+// domain          =   dot-atom / domain-literal / obs-domain
+static auto const Domain = Alternatives(DotAtom, DomainLiteral);
+
+// addr-spec       =   local-part "@" domain
+static auto const AddrSpec = IndexedSequence(
+            std::index_sequence<AddrSpecFields_LocalPart, INDEX_NONE, AddrSpecFields_DomainPart>(),
+            LocalPart, CharExact('@'), Domain);
+
+// 3.4.  Address Specification
+
+// angle-addr      =   [CFWS] "<" addr-spec ">" [CFWS] /
+//                 obs-angle-addr
+static auto const AngleAddr = IndexedSequence(
+            std::index_sequence<AngleAddrFields_CommentBefore, INDEX_NONE, AngleAddrFields_Content, INDEX_NONE, AngleAddrFields_CommentAfter>(),
+            Optional(CFWS), CharExact('<'), AddrSpec, CharExact('>'), Optional(CFWS));
+
+// name-addr       =   [display-name] angle-addr
+static auto const NameAddr = Sequence(Optional(DisplayName), AngleAddr);
+
+// mailbox         =   name-addr / addr-spec
+static auto const Mailbox = IndexedAlternatives(std::index_sequence<MailboxFields_NameAddr, MailboxFields_AddrSpec>(), NameAddr, AddrSpec);
+
+// mailbox-list    =   (mailbox *("," mailbox)) / obs-mbox-list
+static auto const MailboxList = IndexedSequence(std::index_sequence<INDEX_THIS, INDEX_THIS>(),
+                Head(Mailbox),
+                Repeat(IndexedSequence(std::index_sequence<INDEX_NONE, INDEX_THIS>(), CharExact(','), Mailbox)));
+
+// group-list      =   mailbox-list / CFWS / obs-group-list
+static auto const GroupList = IndexedAlternatives(std::index_sequence<GroupListFields_Mailboxes, GroupListFields_Comment>(), MailboxList, CFWS);
+
+// group           =   display-name ":" [group-list] ";" [CFWS]
+static auto const Group = IndexedSequence(std::index_sequence<GroupFields_DisplayName, INDEX_NONE, GroupFields_GroupList, INDEX_NONE, GroupFields_Comment>(),
+                DisplayName, CharExact(':'), GroupList, CharExact(';'), Optional(CFWS));
+
+// address         =   mailbox / group
+static auto const Address = IndexedAlternatives(
+            std::index_sequence<AddressFields_Mailbox, AddressFields_Group>(), Mailbox, Group);
+
+// address-list    =   (address *("," address)) / obs-addr-list
+static auto const AddressList = IndexedSequence(std::index_sequence<INDEX_THIS, INDEX_THIS>(),
+                Head(Address),
+                Repeat(IndexedSequence(std::index_sequence<INDEX_NONE, INDEX_THIS>(), CharExact(','), Address)));
+
+// Currently need to have the entry point as custom overload
+//DECLARE_PARSER_PRIMITIVE(AddressList)
+
 
 template <typename INPUT, typename CHAR_TYPE = char>
 class ParserRFC5322 : public ParserCore<INPUT, CHAR_TYPE>
@@ -124,271 +194,21 @@ public:
         return Base::Parse(*this, args...);
     }
 
-    // 3.2.2.  Folding White Space and Comments
-    bool Parse(nullptr_t, FWSType)
+    bool Parse(nullptr_t, CContentType)
     {
-        // FWS             =   ([*WSP CRLF] 1*WSP) /  obs-FWS
-        do
-        {
-            if (!this->Parse(nullptr, Repeat<1>(WSP)))
-            {
-                return false;
-            }
-        }
-        while (this->Parse(nullptr, CRLF));
-
-        return true;
+        // ccontent        =   ctext / quoted-pair / comment
+        return Parse(nullptr, Alternatives(CText, QuotedPair, Comment));
     }
 
-    bool Parse(nullptr_t, QuotedPairType)
-    {
-        // quoted-pair     = ("\" (VCHAR / WSP))
-        if (this->input_.GetIf('\\'))
-        {
-            this->output_('\\', true);
-            return (this->Parse(nullptr, VCHAR) || this->Parse(nullptr, WSP));
-        }
-        return false;
-    }
-
-    bool Parse(nullptr_t, CContentType);
-
-    bool Parse(nullptr_t, CommentType)
-    {
-        // comment         =   "(" *([FWS] ccontent) [FWS] ")"
-        return this->Parse(nullptr, Sequence(CharExact('('), Repeat(Sequence(Optional(FWS), CContent)), Optional(FWS), CharExact(')')));
-    }
-
-    bool Parse(SubstringPos * comment, CFWSType)
-    {
-        // CFWS            =   (1*([FWS] comment) [FWS]) / FWS
-        bool valid = false;
-
-        if (comment)
-            comment->first = this->output_.Pos();
-        for (;;)
-        {
-            if (Parse(nullptr, FWS))
-            {
-                valid = true;
-            }
-            if (Parse(nullptr, Comment))
-            {
-                valid = true;
-                continue;
-            }
-            break;
-        }
-        if (comment)
-            comment->second = this->output_.Pos();
-
-        if (!valid)
-        {
-            if (comment)
-            {
-                comment->first = comment->second = this->output_.Pos();
-            }
-        }
-
-        return valid;
-    }
-    
-    template <typename PARSER>
-    bool ParseTextBetweenComment(TextWithCommData * result, PARSER parser)
-    {
-        // TextBetweenComment            =   [CFWS] parser [CFWS]
-        auto ioState(this->Save());
-        Parse(FIELD_NOTNULL(result, TextWithCommFields_CommentBefore), CFWS);
-        size_t c1 = this->output_.Pos();
-        if (parser(nullptr))
-        {
-            size_t c2 = this->output_.Pos();
-            Parse(FIELD_NOTNULL(result, TextWithCommFields_CommentAfter), CFWS);
-
-            if (result)
-            {
-                std::get<TextWithCommFields_Content>(*result) = std::make_pair(c1, c2);
-            }
-
-            return ioState.Success();
-        }
-        CLEAR_NOTNULL(result);
-        return false;
-    }
-
-    bool Parse(TextWithCommData * atom, AtomType)
-    {
-        // atom            =   [CFWS] 1*atext [CFWS]
-        return ParseTextBetweenComment(atom, PARSE(Repeat<1>(AText)));
-    }
-
-    bool Parse(nullptr_t, DotAtomTextType)
-    {
-        // dot-atom-text   =   1*atext *("." 1*atext)
-        return this->Parse(nullptr, Sequence(Repeat<1>(AText), Repeat(Sequence(CharExact('.'), Repeat<1>(AText)))));
-    }
-
-    bool Parse(TextWithCommData * dotAtom, DotAtomType)
-    {
-        // dot-atom        =   [CFWS] dot-atom-text [CFWS]
-        return ParseTextBetweenComment(dotAtom, PARSE(DotAtomText));
-    }
-
-    bool Parse(nullptr_t, QContentType)
-    {
-        // qcontent        =   qtext / quoted-pair
-        return Parse(nullptr, QText) || Parse(nullptr, QuotedPair);
-    }
-
-    //bool Parse(nullptr_t, OptFWSType)
+    //bool Parse(AddressListData * addresses, AddressListType)
     //{
-    //    // [FWS]
-    //    return this->ParseOptional(nullptr, PARSE(FWS));
+    //    // address-list    =   (address *("," address)) / obs-addr-list
+    //    return Parse(addresses,
+    //        IndexedSequence(std::index_sequence<INDEX_THIS, INDEX_THIS>(),
+    //            Head(Address),
+    //            Repeat(IndexedSequence(std::index_sequence<INDEX_NONE, INDEX_THIS>(), CharExact(','), Address))));
     //}
-
-    //bool Parse(nullptr_t, SeqOptFWSQContentType)
-    //{
-    //    // *([FWS] qcontent)
-    //    return this->Parse(nullptr, Repeat(Sequence(OptFWS, QContent)));
-    //}
-
-    bool Parse(TextWithCommData * quotedString, QuotedStringType)
-    {
-        // quoted-string   =   [CFWS]
-        //                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
-        //                     [CFWS]
-        return this->ParseTextBetweenComment(quotedString,
-            PARSE(Sequence(CharExact('\"'), Repeat(Sequence(Optional(FWS), QContent)), Optional(FWS), CharExact('\"'))));
-    }
-
-    // 3.2.5.  Miscellaneous Tokens
-    bool Parse(TextWithCommData * word, WordType)
-    {
-        // word            =   atom / quoted-string
-        return Parse(word, Atom) || Parse(word, QuotedString);
-    }
-
-    bool Parse(MultiTextWithComm * phrase, PhraseType)
-    {
-        // phrase          =   1*word / obs-phrase
-        return this->ParseRepeat(phrase, PARSE(Word), 1);
-    }
-
-    // 3.4.1.  Addr-Spec Specification
-    bool Parse(TextWithCommData * localPart, LocalPartType)
-    {
-        // local-part      =   dot-atom / quoted-string / obs-local-part
-        return Parse(localPart, DotAtom) || Parse(localPart, QuotedString);
-    }
-
-    bool Parse(nullptr_t, SeqOptFWSDTextType)
-    {
-        // *([FWS] dtext)
-        return this->Parse(nullptr, Repeat(Sequence(Optional(FWS), DText)));
-    }
-
-    bool Parse(TextWithCommData * domainLiteral, DomainLiteralType)
-    {
-        // domain-literal  =   [CFWS] "[" *([FWS] dtext) [FWS] "]" [CFWS]
-
-        return this->ParseTextBetweenComment(domainLiteral,
-            PARSE(Sequence(
-                CharExact('['),
-                Repeat(Sequence(
-                    Optional(FWS), DText)),
-                Optional(FWS),
-                CharExact(']')))
-            );
-    }
-
-    bool Parse(TextWithCommData * domain, DomainType)
-    {
-        // domain          =   dot-atom / domain-literal / obs-domain
-        return Parse(domain, DotAtom) || Parse(domain, DomainLiteral);
-    }
-
-    bool Parse(AddrSpecData * addrSpec, AddrSpecType)
-    {
-        // addr-spec       =   local-part "@" domain
-        return this->Parse(addrSpec, IndexedSequence(
-            std::index_sequence<AddrSpecFields_LocalPart<AddrSpecFields_LocalPart, INDEX_NONE, AddrSpecFields_DomainPart>(),
-            LocalPart, CharExact('@'), Domain));
-    }
-
-    // 3.4.  Address Specification
-    bool Parse(AngleAddrData * angleAddr, AngleAddrType)
-    {
-        // angle-addr      =   [CFWS] "<" addr-spec ">" [CFWS] /
-        //                 obs-angle-addr
-        return this->Parse(angleAddr, IndexedSequence(
-            std::index_sequence<AngleAddrFields_CommentBefore, INDEX_NONE, AngleAddrFields_Content, INDEX_NONE, AngleAddrFields_CommentAfter>(),
-            Optional(CFWS), CharExact('<'), AddrSpec, CharExact('>'), Optional(CFWS)));
-    }
-
-    bool Parse(NameAddrData * nameAddr, NameAddrType)
-    {
-        // name-addr       =   [display-name] angle-addr
-        return this->Parse(nameAddr, Sequence(Optional(DisplayName), AngleAddr));
-    }
-
-    bool Parse(MailboxData * mailbox, MailboxType)
-    {
-        // mailbox         =   name-addr / addr-spec
-        return Parse(mailbox, Alternatives(NameAddr, AddrSpec));
-    }
-
-    template <typename ELEMS_PTR, typename PRIMITIVE>
-    bool ParseList(ELEMS_PTR list, PRIMITIVE primitive)
-    {
-        // X-list    =   (X *("," X))
-        return Parse(list,
-            IndexedSequence(std::index_sequence<INDEX_THIS, INDEX_THIS>(),
-                Head(primitive),
-                Repeat(IndexedSequence(std::index_sequence<INDEX_NONE, INDEX_THIS>(), CharExact(','), primitive))));
-    }
-
-    bool Parse(MailboxListData * mailboxList, MailboxListType)
-    {
-        // mailbox-list    =   (mailbox *("," mailbox)) / obs-mbox-list
-        return this->ParseList(mailboxList, Mailbox);
-    }
-
-    bool Parse(GroupListData * group, GroupListType)
-    {
-        // group-list      =   mailbox-list / CFWS / obs-group-list
-        return Parse(group, IndexedAlternatives(
-            std::index_sequence<GroupListFields_Mailboxes, GroupListFields_Comment>(),
-            MailboxList, CFWS));
-    }
-
-    bool Parse(GroupData * group, GroupType)
-    {
-        // group           =   display-name ":" [group-list] ";" [CFWS]
-        return this->Parse(group,
-            IndexedSequence(
-                std::index_sequence<GroupFields_DisplayName, SIZE_MAX, GroupFields_GroupList, SIZE_MAX, GroupFields_Comment>(),
-                DisplayName, CharExact(':'), GroupList, CharExact(';'), Optional(CFWS)));
-    }
-
-    bool Parse(AddressData * address, AddressType)
-    {
-        // address         =   mailbox / group
-        return Parse(address, Alternatives(Mailbox, Group));
-    }
-
-    bool Parse(AddressListData * addresses, AddressListType)
-    {
-        // address-list    =   (address *("," address)) / obs-addr-list
-        return this->ParseList(addresses, Address);
-    }
 };
-
-template <typename INPUT, typename CHAR_TYPE>
-bool ParserRFC5322<INPUT, CHAR_TYPE>::Parse(nullptr_t, CContentType)
-{
-    // ccontent        =   ctext / quoted-pair / comment
-    return Parse(nullptr, Alternatives(CText, QuotedPair, Comment));
-}
 
 template <typename INPUT, typename CHAR_TYPE>
 ParserRFC5322<INPUT, CHAR_TYPE> Make_ParserRFC5322(INPUT && input, CHAR_TYPE charType)
