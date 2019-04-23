@@ -295,28 +295,6 @@ inline SequenceType<std::true_type, PRIMITIVES...> Alternatives(PRIMITIVES... pr
     return SequenceType<std::true_type, PRIMITIVES...>(primitives...);
 }
 
-template <typename IS_ALT, typename INDEX_SEQUENCE, typename... PRIMITIVES>
-class IndexedSequenceType : public std::tuple<PRIMITIVES...>
-{
-public:
-    inline IndexedSequenceType(PRIMITIVES... primitives)
-        : std::tuple<PRIMITIVES...>(primitives...)
-    {
-    }
-};
-
-template <size_t... INDICES, typename... PRIMITIVES>
-inline IndexedSequenceType<std::false_type, std::index_sequence<INDICES...>, PRIMITIVES...> IndexedSequence(std::index_sequence<INDICES...>, PRIMITIVES... primitives)
-{
-    return IndexedSequenceType<std::false_type, std::index_sequence<INDICES...>, PRIMITIVES...>(primitives...);
-}
-
-template <size_t... INDICES, typename... PRIMITIVES>
-inline IndexedSequenceType<std::true_type, std::index_sequence<INDICES...>, PRIMITIVES...> IndexedAlternatives(std::index_sequence<INDICES...>, PRIMITIVES... primitives)
-{
-    return IndexedSequenceType<std::true_type, std::index_sequence<INDICES...>, PRIMITIVES...>(primitives...);
-}
-
 template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
 class RepeatType
 {
@@ -375,6 +353,8 @@ inline HeadType<PRIMITIVE> Head(PRIMITIVE primitive)
     return HeadType<PRIMITIVE>(primitive);
 }
 
+template <size_t IDX>
+class Idx {};
 
 template <typename INPUT, typename CHAR_TYPE>
 class ParserIO
@@ -479,32 +459,45 @@ inline bool Parse(PARSER & parser, nullptr_t, CharExactType<CHAR_TYPE> const & w
 
 namespace Impl
 {
-    template <size_t OFFSET, typename PARSER, typename DEST_PTR, typename... PRIMITIVES>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, SequenceType<std::false_type, PRIMITIVES...> const & what)
+    template <size_t OFFSET, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 1), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<IS_ALT, PRIMITIVES...> const & what)
     {
-        enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(PRIMITIVES) - 1) };
-        if (Parse(parser, Impl::FieldNotNull<OFFSET>(dest), std::get<OFFSET>(what)))
-        {
-            if (OFFSET < NEXT_OFFSET)
-                return ParseItem<NEXT_OFFSET>(parser, dest, what);
-            else
-                return true;
-        }
-        return false;
+        return Parse(parser, Impl::FieldNotNull<OFFSET>(dest), nextElement);
     }
 
-    template <size_t OFFSET, typename PARSER, typename DEST_PTR, typename... PRIMITIVES>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, SequenceType<std::true_type, PRIMITIVES...> const & what)
+    template <size_t OFFSET, typename PARSER, typename DEST_PTR, size_t INDEX, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 2), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, Idx<INDEX> const &, SequenceType<IS_ALT, PRIMITIVES...> const & what)
     {
-        enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(PRIMITIVES) - 1) };
+        return Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET + 1>(what));
+    }
 
-        if (Parse(parser, Impl::FieldNotNull<INDEX_THIS>(dest), std::get<OFFSET>(what)))
+    template <size_t OFFSET, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<IS_ALT, PRIMITIVES...> const & what);
+
+    template <size_t OFFSET, typename PARSER, typename DEST_PTR, size_t INDEX, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 2), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, Idx<INDEX> const &, SequenceType<IS_ALT, PRIMITIVES...> const & what)
+    {
+        bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET + 1>(what));
+        if (IS_ALT() && result)
             return true;
+        else if (result)
+            return ParseItem<OFFSET + 2>(parser, dest, std::get<OFFSET + 2>(what), what);
+        else
+            return false;
+    }
 
-        if (OFFSET < NEXT_OFFSET)
-            return ParseItem<NEXT_OFFSET>(parser, dest, what);
+    template <size_t OFFSET, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> >
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<IS_ALT, PRIMITIVES...> const & what)
+    {
+        enum { INDEX = IS_ALT::value ? INDEX_THIS : OFFSET };
+        bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
+        if (IS_ALT() && result)
+            return true;
+        else if (result)
+            return ParseItem<OFFSET + 1>(parser, dest, std::get<OFFSET + 1>(what), what);
+        else
+            return false;
 
-        return false;
     }
 }
 
@@ -512,49 +505,7 @@ template <typename PARSER, typename DEST_PTR, typename IS_ALT, typename... PRIMI
 inline bool Parse(PARSER & parser, DEST_PTR dest, SequenceType<IS_ALT, PRIMITIVES...> const & what)
 {
     auto ioState(parser.Save(dest));
-    if (Impl::ParseItem<0>(parser, dest, what))
-    {
-        return ioState.Success();
-    }
-    Impl::ClearNotNull(dest);
-    return false;
-}
-
-namespace Impl
-{
-    template <size_t OFFSET, typename PARSER, typename DEST_PTR, size_t INDEX, typename IS_ALT, typename INDEX_SEQUENCE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 1), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, std::index_sequence<INDEX> indices, IndexedSequenceType<IS_ALT, INDEX_SEQUENCE, PRIMITIVES...> const & what)
-    {
-        return Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET>(what));
-    }
-
-    template <size_t OFFSET, typename PARSER, typename DEST_PTR, size_t INDEX, size_t... OTHER_INDICES, typename INDEX_SEQUENCE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, std::index_sequence<INDEX, OTHER_INDICES...> indices, IndexedSequenceType<std::true_type, INDEX_SEQUENCE, PRIMITIVES...> const & what)
-    {
-        if (Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET>(what)))
-        {
-            return true;
-        }
-
-        return ParseItem<OFFSET + 1>(parser, dest, std::index_sequence<OTHER_INDICES...>(), what);
-    }
-
-    template <size_t OFFSET, typename PARSER, typename DEST_PTR, size_t INDEX, size_t... OTHER_INDICES, typename INDEX_SEQUENCE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, std::index_sequence<INDEX, OTHER_INDICES...> indices, IndexedSequenceType<std::false_type, INDEX_SEQUENCE, PRIMITIVES...> const & what)
-    {
-        if (Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET>(what)))
-        {
-            return ParseItem<OFFSET + 1>(parser, dest, std::index_sequence<OTHER_INDICES...>(), what);
-        }
-        return false;
-    }
-}
-
-template <typename PARSER, typename DEST_PTR, typename IS_ALT, typename INDEX_SEQUENCE, typename... PRIMITIVES>
-inline bool Parse(PARSER & parser, DEST_PTR dest, IndexedSequenceType<IS_ALT, INDEX_SEQUENCE, PRIMITIVES...> const & what)
-{
-    auto ioState(parser.Save(dest));
-    if (Impl::ParseItem<0>(parser, dest, INDEX_SEQUENCE(), what))
+    if (Impl::ParseItem<0>(parser, dest, std::get<0>(what), what))
     {
         return ioState.Success();
     }

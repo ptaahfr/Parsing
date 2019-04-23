@@ -113,9 +113,10 @@ PARSER_RULE(QContent, Alternatives(QText(), QuotedPair()))
 // quoted-string   =   [CFWS]
 //                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
 //                     [CFWS]
-PARSER_RULE(QuotedString, IndexedSequence(
-    std::index_sequence<TextWithCommFields_CommentBefore, INDEX_NONE, TextWithCommFields_CommentBefore, INDEX_NONE, TextWithCommFields_CommentAfter>(),
-    Optional(CFWS()), CharExact('\"'), Sequence(Repeat(Optional(FWS()), QContent()), Optional(FWS())), CharExact('\"'), Optional(CFWS())))
+PARSER_RULE(QuotedString, Sequence(
+    Idx<TextWithCommFields_CommentBefore>(), Optional(CFWS()),
+    Idx<INDEX_NONE>(), CharExact('\"'), Idx<TextWithCommFields_Content>(), Sequence(Repeat(Optional(FWS()), QContent()), Optional(FWS())), Idx<INDEX_NONE>(), CharExact('\"'),
+    Idx<TextWithCommFields_CommentAfter>(), Optional(CFWS())))
 
 // 3.2.5.  Miscellaneous Tokens
 
@@ -134,49 +135,48 @@ PARSER_RULE(DisplayName, Phrase())
 PARSER_RULE(LocalPart, Alternatives(DotAtom(), QuotedString()))
 
 // domain-literal  =   [CFWS] "[" *([FWS] dtext) [FWS] "]" [CFWS]
-PARSER_RULE(DomainLiteral, IndexedSequence(
-    std::index_sequence<TextWithCommFields_CommentBefore, INDEX_NONE, TextWithCommFields_CommentBefore, INDEX_NONE, TextWithCommFields_CommentAfter>(),
-    Optional(CFWS()), CharExact('['), Sequence(Repeat(Optional(FWS()), DText()), Optional(FWS())), CharExact(']'), Optional(CFWS())))
+PARSER_RULE(DomainLiteral, Sequence(
+    Idx<TextWithCommFields_CommentBefore>(), Optional(CFWS()),
+    Idx<INDEX_NONE>(), CharExact('['),
+    Idx<TextWithCommFields_Content>(), Sequence(Repeat(Optional(FWS()), DText()), Optional(FWS())),
+    Idx<INDEX_NONE>(), CharExact(']'),
+    Idx<TextWithCommFields_CommentAfter>(), Optional(CFWS())))
 
 // domain          =   dot-atom / domain-literal / obs-domain
 PARSER_RULE(Domain, Alternatives(DotAtom(), DomainLiteral()))
 
 // addr-spec       =   local-part "@" domain
-PARSER_RULE_DATA(AddrSpec, IndexedSequence(
-    std::index_sequence<AddrSpecFields_LocalPart, INDEX_NONE, AddrSpecFields_DomainPart>(),
-    LocalPart(), CharExact('@'), Domain()))
+PARSER_RULE_DATA(AddrSpec, Sequence(
+    Idx<AddrSpecFields_LocalPart>(), LocalPart(), Idx<INDEX_NONE>(), CharExact('@'), Idx<AddrSpecFields_DomainPart>(), Domain()))
 
 // 3.4.  Address Specification
 
 // angle-addr      =   [CFWS] "<" addr-spec ">" [CFWS] /
 //                 obs-angle-addr
-PARSER_RULE_DATA(AngleAddr, IndexedSequence(
-    std::index_sequence<AngleAddrFields_CommentBefore, INDEX_NONE, AngleAddrFields_Content, INDEX_NONE, AngleAddrFields_CommentAfter>(),
-    Optional(CFWS()), CharExact('<'), AddrSpec(), CharExact('>'), Optional(CFWS())))
+PARSER_RULE_DATA(AngleAddr, Sequence(
+    Idx<AngleAddrFields_CommentBefore>(), Optional(CFWS()), Idx<INDEX_NONE>(), CharExact('<'), Idx<AngleAddrFields_Content>(), AddrSpec(), Idx<INDEX_NONE>(), CharExact('>'), Idx<AngleAddrFields_CommentAfter>(), Optional(CFWS())))
 
 // name-addr       =   [display-name] angle-addr
 PARSER_RULE_DATA(NameAddr, Sequence(Optional(DisplayName()), AngleAddr()))
 
 // mailbox         =   name-addr / addr-spec
-PARSER_RULE_DATA(Mailbox, IndexedAlternatives(std::index_sequence<MailboxFields_NameAddr, MailboxFields_AddrSpec>(), NameAddr(), AddrSpec()))
+PARSER_RULE_DATA(Mailbox, Alternatives(Idx<MailboxFields_NameAddr>(), NameAddr(), Idx<MailboxFields_AddrSpec>(), AddrSpec()))
 
 // mailbox-list    =   (mailbox *("," mailbox)) / obs-mbox-list
-PARSER_RULE_DATA(MailboxList, IndexedSequence(std::index_sequence<INDEX_THIS, INDEX_THIS>(),
-    Head(Mailbox()), Repeat(IndexedSequence(std::index_sequence<INDEX_NONE, INDEX_THIS>(), CharExact(','), Mailbox()))))
+PARSER_RULE_DATA(MailboxList, Sequence(
+    Idx<INDEX_THIS>(), Head(Mailbox()), Idx<INDEX_THIS>(), Repeat(Sequence(Idx<INDEX_NONE>(), CharExact(','), Idx<INDEX_THIS>(), Mailbox()))))
 
 // group-list      =   mailbox-list / CFWS / obs-group-list
-PARSER_RULE_DATA(GroupList, IndexedAlternatives(std::index_sequence<GroupListFields_Mailboxes, GroupListFields_Comment>(), MailboxList(), CFWS()))
+PARSER_RULE_DATA(GroupList, Alternatives(Idx<GroupListFields_Mailboxes>(), MailboxList(), Idx<GroupListFields_Comment>(), CFWS()))
 
 // group           =   display-name ":" [group-list] ";" [CFWS]
-PARSER_RULE_DATA(Group, IndexedSequence(std::index_sequence<GroupFields_DisplayName, INDEX_NONE, GroupFields_GroupList, INDEX_NONE, GroupFields_Comment>(),
-    DisplayName(), CharExact(':'), GroupList(), CharExact(';'), Optional(CFWS())))
+PARSER_RULE_DATA(Group, Sequence(
+    Idx<GroupFields_DisplayName>(), DisplayName(), Idx<INDEX_NONE>(), CharExact(':'), Idx<GroupFields_GroupList>(), GroupList(), Idx<INDEX_NONE>(), CharExact(';'), Idx<GroupFields_Comment>(), Optional(CFWS())))
 
 // address         =   mailbox / group
-PARSER_RULE_DATA(Address, IndexedAlternatives(
-    std::index_sequence<AddressFields_Mailbox, AddressFields_Group>(), Mailbox(), Group()))
+PARSER_RULE_DATA(Address, Alternatives(Idx<AddressFields_Mailbox>(), Mailbox(), Idx<AddressFields_Group>(), Group()))
 
 // address-list    =   (address *("," address)) / obs-addr-list
-PARSER_RULE_DATA(AddressList, IndexedSequence(std::index_sequence<INDEX_THIS, INDEX_THIS>(),
-    Head(Address()),
-    Repeat(IndexedSequence(std::index_sequence<INDEX_NONE, INDEX_THIS>(), CharExact(','), Address()))))
+PARSER_RULE_DATA(AddressList, Sequence(Idx<INDEX_THIS>(), Head(Address()), Idx<INDEX_THIS>(),
+    Repeat(Sequence(Idx<INDEX_NONE>(), CharExact(','), Idx<INDEX_THIS>(), Address()))))
 }

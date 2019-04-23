@@ -13,12 +13,16 @@
 
 #include "ParserRFC5322Data.hpp"
 #include "ParserRFC5322Rules.hpp"
+
+#ifdef TEST_ABNF
 #include "ParserRFC5234.hpp"
+#endif
 
 #include <iostream>
 
 void ParseABNF()
 {
+#ifdef TEST_ABNF
     std::string ABNFRulesABNF = R"ABNF(
          defined-as     =  *c-wsp ("=" / "=/") *c-wsp
                                 ; basic rules definition and
@@ -73,6 +77,7 @@ void ParseABNF()
                                 ;  last resort
 )ABNF";
 
+    using namespace RFC5234ABNF;
 
     auto parser(Make_Parser([&, pos = (size_t)0] () mutable
     {
@@ -81,6 +86,9 @@ void ParseABNF()
         return EOF;
     }, (char)0));
 
+    RuleListData rules;
+    Parse(parser, &rules, rulelist());
+#endif
 }
 
 void test_address(std::string const & addr)
@@ -153,6 +161,8 @@ void test_address(std::string const & addr)
 
 int main()
 {
+    ParseABNF();
+
     test_address("troll@bitch.com, arobar     d <sigma@addr.net>, sir john snow <user.name+tag+sorting@example.com(comment)>");
     test_address("arobar     d <sigma@addr.net>");
     test_address("troll@bitch.com");
