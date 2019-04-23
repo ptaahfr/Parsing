@@ -25,13 +25,13 @@ namespace RFC5234Core
     // CRLF           =  CR LF
     PARSER_RULE(CRLF, Sequence(CR(), LF()));
     // CTL            =  %x00-1F / %x7F
-    PARSER_RULE(CTL, Alternative(CharRange<0x00, 0x1F>(), CharVal<0x7F>()))
+    PARSER_RULE(CTL, Alternatives(CharRange<0x00, 0x1F>(), CharVal<0x7F>()))
     // DIGIT          =  %x30-39
     PARSER_RULE(DIGIT, CharRange<0x30, 0x39>());
     // DQUOTE         =  %x22
     PARSER_RULE(DQUOTE, CharVal<0x22>());
     // HEXDIG         =  DIGIT / "A" / "B" / "C" / "D" / "E" / "F"
-    PARSER_RULE(HEXDIG, Alternatives(DIGIT(), CharRange('A', 'F')))
+    PARSER_RULE(HEXDIG, Alternatives(DIGIT(), CharRange<'A', 'F'>()))
     // HTAB           =  %x09
     PARSER_RULE(HTAB, CharVal<0x09>());
     // OCTET          =  %x00-FF

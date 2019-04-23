@@ -93,18 +93,26 @@ void ParseABNF()
 
 void test_grammar()
 {
+
     using namespace RFC5234Core;
 
-    //std::cout << IsConstant(CR()) << std::endl;
-    //std::cout << IsConstant(Sequence(CR())) << std::endl;
-    //std::cout << IsConstant(Sequence(Repeat<10, 10>(CRLF()))) << std::endl;
-    //std::cout << IsConstant(Sequence(Repeat<1>(DIGIT()))) << std::endl;
+    std::cout << decltype(IsConstant(CR()))() << std::endl;
+    std::cout << decltype(IsConstant(LF()))() << std::endl;
+    std::cout << decltype(IsConstant(DIGIT()))() << std::endl;
+    std::cout << decltype(IsConstant(Sequence(CR())))() << std::endl;
+    //std::cout << decltype(::IsConstant(Sequence(CR())))() << std::endl;
+    //std::cout << decltype(IsConstant(Sequence(CR(), LF())))() << std::endl;
+    std::cout << decltype(IsConstant(CRLF()))() << std::endl;
+    std::cout << decltype(IsConstant(Sequence(CR())))() << std::endl;
+    std::cout << decltype(IsConstant(Sequence(Repeat<10, 10>(CRLF()))))() << std::endl;
+    std::cout << decltype(IsConstant(Sequence(Repeat<1>(DIGIT()))))() << std::endl;
 
     return;
 }
 
 void TestRFC5322()
 {
+#if 0
 #define TEST_RULE(type, name, str) \
     { \
         type nameResult; \
@@ -125,6 +133,7 @@ void TestRFC5322()
     TEST_RULE(NameAddrData, NameAddr, "mrs johns <local@domain> (comment)");
 
     return;
+#endif
 }
 
 void test_address(std::string const & addr)
