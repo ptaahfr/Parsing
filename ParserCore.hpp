@@ -13,31 +13,33 @@
 namespace RFC5234Core
 {
     // ALPHA          =  %x41-5A / %x61-7A   ; A-Z / a-z
-    PARSER_RULE_CHARPRED(ALPHA, [] (auto ch) { return ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z'; });
+    PARSER_RULE(ALPHA, Alternatives(CharRange<0x41, 0x5A>(), CharRange<0x61, 0x7A>()));
     // BIT            =  "0" / "1"
-    PARSER_RULE_CHARPRED(BIT, [] (auto ch) { return ch == '0' || ch == '1'; });
+    PARSER_RULE(BIT, CharVal<'0', '1'>());
     // CHAR           =  %x01-7F
-    PARSER_RULE_CHARPRED(CHAR, [] (auto ch) { return ch >= 1 && ch <= 0x7f; });
+    PARSER_RULE(CHAR, CharRange<1, 0x7F>());
     // LF             =  %x0A
-    PARSER_RULE(LF, CharExact('\n'));
+    PARSER_RULE(LF, CharVal<0x0A>());
     // CR             =  %x0D
-    PARSER_RULE(CR, CharExact('\r'));
+    PARSER_RULE(CR, CharVal<0x0D>());
     // CRLF           =  CR LF
     PARSER_RULE(CRLF, Sequence(CR(), LF()));
     // CTL            =  %x00-1F / %x7F
-    PARSER_RULE_CHARPRED(CTL, [] (auto ch) { return ch >= 0x00 && ch <= 0x1f || ch == 0x7f; });
+    PARSER_RULE(CTL, Alternative(CharRange<0x00, 0x1F>(), CharVal<0x7F>()))
     // DIGIT          =  %x30-39
-    PARSER_RULE_CHARPRED(DIGIT, [] (auto ch) { return ch >= '0' && ch <= '9'; });
+    PARSER_RULE(DIGIT, CharRange<0x30, 0x39>());
+    // DQUOTE         =  %x22
+    PARSER_RULE(DQUOTE, CharVal<0x22>());
     // HEXDIG         =  DIGIT / "A" / "B" / "C" / "D" / "E" / "F"
-    PARSER_RULE_CHARPRED(HEXDIG, [] (auto ch) { return ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'F'; });
+    PARSER_RULE(HEXDIG, Alternatives(DIGIT(), CharRange('A', 'F')))
     // HTAB           =  %x09
-    PARSER_RULE(HTAB, CharExact('\t'));
+    PARSER_RULE(HTAB, CharVal<0x09>());
     // OCTET          =  %x00-FF
-    PARSER_RULE_CHARPRED(OCTET, [] (auto ch) { return ch >= 0 && ch <= 255; });
+    PARSER_RULE(OCTET, CharRange<0x00, 0xFF>());
     // SP             =  %x20
-    PARSER_RULE(SP, CharExact(' '));
+    PARSER_RULE(SP, CharVal<0x20>());
     // VCHAR          =  %x21-7E
-    PARSER_RULE_CHARPRED(VCHAR, [] (auto ch) { return ch >= 0x21 && ch <= 0x7e; });
+    PARSER_RULE(VCHAR, CharRange<0x21, 0x7E>());
     // WSP            =  SP / HTAB
     PARSER_RULE(WSP, Alternatives(SP(), HTAB()));
     // LWSP           =  *(WSP / CRLF WSP)

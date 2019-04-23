@@ -16,6 +16,8 @@
 #define INDEX_NONE INT_MAX
 #define INDEX_THIS (INT_MAX-1)
 
+using MaxCharType = int;
+
 using SubstringPos = std::pair<size_t, size_t>;
 
 namespace Impl
@@ -77,11 +79,11 @@ namespace Impl
         {
         }
 
-        inline int operator()()
+        inline MaxCharType operator()()
         {
             if (bufferPos_ >= buffer_.size())
             {
-                int ch = input_();
+                MaxCharType ch = (MaxCharType)input_();
                 buffer_.push_back(ch);
             }
             assert(bufferPos_ < buffer_.size());
@@ -238,24 +240,34 @@ namespace Impl
 
 }
 
-#define PARSER_CUSTOM_PRIMITIVE_T1(name, t1) \
-    template <typename t1> \
-    class name##Type : public std::tuple<t1> \
-    { \
-    public: \
-        inline name##Type(t1 arg) : std::tuple<t1>(arg) {} \
-    }; \
-    template <typename t1> \
-    inline name##Type<t1> name(t1 arg) \
-    { \
-        return name##Type<t1>(arg); \
-    };
+template <MaxCharType... CODES>
+class CharVal
+{
+};
 
-#define PARSER_CUSTOM_PRIMITIVE(name) \
-    class name##Type { } name;
+template <MaxCharType CH1, MaxCharType CH2>
+class CharRange
+{
+};
 
-PARSER_CUSTOM_PRIMITIVE_T1(CharPred, PREDICATE)
-PARSER_CUSTOM_PRIMITIVE_T1(CharExact, CHAR_TYPE)
+template <MaxCharType CH>
+inline bool Match(int inputChar, CharVal<CH>)
+{
+    return inputChar == CH;
+}
+
+template <MaxCharType CH, MaxCharType ... OTHERS>
+inline bool Match(int inputChar, CharVal<CH, OTHERS...>)
+{
+    return (inputChar == CH) || Match(inputChar, CharVal<OTHERS...>());
+}
+
+template <int CH1, int CH2>
+inline bool Match(int inputChar, CharRange<CH1, CH2>)
+{
+    return inputChar >= CH1 && inputChar <= CH2;
+}
+
 
 #define PARSER_RULE_FORWARD(name) \
     class name {};
@@ -263,11 +275,6 @@ PARSER_CUSTOM_PRIMITIVE_T1(CharExact, CHAR_TYPE)
 #define PARSER_RULE_PARTIAL(name, ...) \
     template <typename PARSER, typename TYPE> \
     inline bool Parse(PARSER & parser, TYPE result, name) { return Parse(parser, result, __VA_ARGS__); }
-
-#define PARSER_RULE_CHARPRED(name, ...) \
-    class name {}; \
-    PARSER_RULE_PARTIAL(name, CharPred(__VA_ARGS__))
-    //std::false_type IsConstant(name) { return std::false_type(); }
 
 #define PARSER_RULE(name, ...) \
     class name {}; \
@@ -473,28 +480,30 @@ inline auto Make_ParserFromString(std::basic_string<CHAR_TYPE> const & str)
     }, (CHAR_TYPE)0);
 }
 
-template <typename PARSER, typename PREDICATE>
-inline bool Parse(PARSER & parser, nullptr_t, CharPredType<PREDICATE> const & what)
+template <typename PARSER, MaxCharType... CODES>
+inline bool Parse(PARSER & parser, nullptr_t, CharVal<CODES...> const & what, bool escape = false)
 {
     auto ch(parser.Input()());
-    if (std::get<0>(what)(ch))
+    if (Match(ch, what))
     {
-        parser.Output()(ch);
+        parser.Output()(ch, escape);
         return true;
     }
     parser.Input().Back();
     return false;
 }
 
-template <typename PARSER, typename CHAR_TYPE>
-inline bool Parse(PARSER & parser, nullptr_t, CharExactType<CHAR_TYPE> const & what, bool escape = false)
+
+template <typename PARSER, MaxCharType CH1, MaxCharType CH2>
+inline bool Parse(PARSER & parser, nullptr_t, CharRange<CH1, CH2> const & what, bool escape = false)
 {
-    auto ch(std::get<0>(what));
-    if (parser.Input().GetIf(ch))
+    auto ch(parser.Input()());
+    if (Match(ch, what))
     {
         parser.Output()(ch, escape);
         return true;
     }
+    parser.Input().Back();
     return false;
 }
 
