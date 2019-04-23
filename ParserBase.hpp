@@ -13,8 +13,8 @@
 #include <string>
 #include <algorithm>
 
-#define INDEX_NONE INT_MAX
-#define INDEX_THIS (INT_MAX-1)
+#define INDEX_NONE INT_MAX          // Used to define a primitive that has no specific member
+#define INDEX_THIS (INT_MAX-1)      // Use to define a primitive that parse current object instead of a member
 
 using MaxCharType = int;
 
@@ -286,7 +286,11 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
     template <typename PARSER> \
     bool Parse(PARSER & parser, name##Data * result) { return Parse(parser, result, __VA_ARGS__); }
 
-template <typename IS_ALT, typename... PRIMITIVES>
+using SeqTypeSeq = std::integral_constant<size_t, 0>;
+using SeqTypeAlt = std::integral_constant<size_t, 1>;
+using SeqTypeUnion = std::integral_constant<size_t, 2>;
+
+template <typename SEQ_TYPE, typename... PRIMITIVES>
 class SequenceType
 {
     std::tuple<PRIMITIVES...> primitives_;
@@ -301,16 +305,26 @@ public:
 
 };
 
+
+// Sequence try to parse consecutive primitives in the current object's consecutive members
 template <typename... PRIMITIVES>
-inline SequenceType<std::false_type, PRIMITIVES...> Sequence(PRIMITIVES... primitives)
+inline SequenceType<SeqTypeSeq, PRIMITIVES...> Sequence(PRIMITIVES... primitives)
 {
-    return SequenceType<std::false_type, PRIMITIVES...>(primitives...);
+    return SequenceType<SeqTypeSeq, PRIMITIVES...>(primitives...);
 }
 
+// Alternatives try to parse different primitive in the current object
 template <typename... PRIMITIVES>
-inline SequenceType<std::true_type, PRIMITIVES...> Alternatives(PRIMITIVES... primitives)
+inline SequenceType<SeqTypeAlt, PRIMITIVES...> Alternatives(PRIMITIVES... primitives)
 {
-    return SequenceType<std::true_type, PRIMITIVES...>(primitives...);
+    return SequenceType<SeqTypeAlt, PRIMITIVES...>(primitives...);
+}
+
+// Union try to parse different primitive in the current object's consecutive members
+template <typename... PRIMITIVES>
+inline SequenceType<SeqTypeUnion, PRIMITIVES...> Union(PRIMITIVES... primitives)
+{
+    return SequenceType<SeqTypeUnion, PRIMITIVES...>(primitives...);
 }
 
 template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
@@ -334,7 +348,7 @@ inline RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> Repeat(PRIMITIVE primitive)
 }
 
 template <size_t MIN_COUNT = 0, size_t MAX_COUNT = SIZE_MAX, typename PRIMITIVE, typename... OTHER_PRIMITIVES>
-inline RepeatType<MIN_COUNT, MAX_COUNT, SequenceType<std::false_type, PRIMITIVE, OTHER_PRIMITIVES...> > Repeat(PRIMITIVE primitive, OTHER_PRIMITIVES... otherPrimitives)
+inline RepeatType<MIN_COUNT, MAX_COUNT, SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> > Repeat(PRIMITIVE primitive, OTHER_PRIMITIVES... otherPrimitives)
 {
     return Repeat<MIN_COUNT, MAX_COUNT>(Sequence(primitive, otherPrimitives...));
 }
@@ -346,15 +360,17 @@ inline RepeatType<0, 1, PRIMITIVE> Optional(PRIMITIVE primitive)
 }
 
 template <typename PRIMITIVE, typename... OTHER_PRIMITIVES>
-inline RepeatType<0, 1, SequenceType<std::false_type, PRIMITIVE, OTHER_PRIMITIVES...> > Optional(PRIMITIVE primitive, OTHER_PRIMITIVES... otherPrimitives)
+inline RepeatType<0, 1, SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> > Optional(PRIMITIVE primitive, OTHER_PRIMITIVES... otherPrimitives)
 {
     return Optional(Sequence(primitive, otherPrimitives...));
 }
 
-template <typename PRIMITIVE>
-inline RepeatType<1, 1, PRIMITIVE> Head(PRIMITIVE primitive)
+// Use head and tail when primitiveHead is the first elements of a list and primitiveTails contains the others elements of the list
+template <typename PRIMITIVE, typename... OTHER_PRIMITIVES>
+inline auto HeadTail(PRIMITIVE primitiveHead, OTHER_PRIMITIVES... primitiveTail)
+-> decltype(Sequence(Idx<INDEX_THIS>(), Repeat<1, 1>(primitiveHead), Idx<INDEX_THIS>(), Repeat(primitiveTail...)))
 {
-    return Repeat<1, 1>(primitive);
+    return Sequence(Idx<INDEX_THIS>(), Repeat<1, 1>(primitiveHead), Idx<INDEX_THIS>(), Repeat(primitiveTail...));
 }
 
 template <typename PRIMITIVE>
@@ -366,13 +382,13 @@ inline std::true_type IsConstant(CharVal<CODE> const & primitive);
 template <int CH1, int CH2>
 inline auto IsConstant(CharRange<CH1, CH2> const & primitive) -> decltype(std::bool_constant<(CH2 <= CH1)>());
 
-template <typename IS_ALT, typename PRIMITIVE>
-inline auto IsConstant(SequenceType<IS_ALT, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
+template <typename SEQ_TYPE, typename PRIMITIVE>
+inline auto IsConstant(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
 
 template <typename PRIMITIVE, typename... OTHER_PRIMITIVES, std::enable_if_t<(sizeof...(OTHER_PRIMITIVES) > 0), void *> = nullptr>
-inline auto IsConstant(SequenceType<std::false_type, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+inline auto IsConstant(SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
 -> std::bool_constant<std::remove_reference_t<decltype(IsConstant(std::declval<PRIMITIVE>()))>::value
-                   && std::remove_reference_t<decltype(IsConstant(std::declval<SequenceType<std::false_type, OTHER_PRIMITIVES...> >()))>::value>;
+                   && std::remove_reference_t<decltype(IsConstant(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>::value>;
 
 template <size_t FIXED_COUNT, typename PRIMITIVE>
 inline auto IsConstant(RepeatType<FIXED_COUNT, FIXED_COUNT, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
@@ -496,46 +512,46 @@ inline bool Parse(PARSER & parser, nullptr_t, CharRange<CH1, CH2> const & what, 
 
 namespace Impl
 {
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 1), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<IS_ALT, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 1), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
-        enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE : (IS_ALT::value ? INDEX_THIS : IMPLICIT_INDEX) };
+        enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE : (SEQ_TYPE::value == SeqTypeAlt::value ? INDEX_THIS : IMPLICIT_INDEX) };
         return Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, size_t INDEX, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 2), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, Idx<INDEX> const &, SequenceType<IS_ALT, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 2), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
         return Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET + 1>(what.Primitives()));
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<IS_ALT, PRIMITIVES...> const & what);
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what);
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, size_t INDEX, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 2), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, Idx<INDEX> const &, SequenceType<IS_ALT, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 2), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
         auto const & nextElement(std::get<OFFSET + 1>(what.Primitives()));
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
-        if (IS_ALT() && result)
+        if ((SEQ_TYPE::value != SeqTypeSeq::value) && result)
             return true;
-        else if (IS_ALT() || result)
+        else if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
             return ParseItem<OFFSET + 2, IMPLICIT_INDEX>(parser, dest, std::get<OFFSET + 2>(what.Primitives()), what);
         else
             return false;
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename IS_ALT, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> >
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<IS_ALT, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> >
+    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
-        enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE : (IS_ALT::value ? INDEX_THIS : IMPLICIT_INDEX) };
+        enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE : (SEQ_TYPE::value == SeqTypeAlt::value ? INDEX_THIS : IMPLICIT_INDEX) };
         enum { NEXT_IMPLICIT_INDEX = (INDEX == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX) };
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
-        if (IS_ALT() && result)
+        if ((SEQ_TYPE::value != SeqTypeSeq::value) && result)
             return true;
-        else if (IS_ALT() || result)
+        else if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
             return ParseItem<OFFSET + 1, NEXT_IMPLICIT_INDEX>(parser, dest, std::get<OFFSET + 1>(what.Primitives()), what);
         else
             return false;

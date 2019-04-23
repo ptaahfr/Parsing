@@ -15,19 +15,17 @@ using namespace RFC5234Core;
 
 // Rules defined in https://tools.ietf.org/html/rfc5322
 
-// atext           =   ALPHA / DIGIT /    ; Printable US-ASCII
-//                    "!" / "#" /        ;  characters not including
-//                    "$" / "%" /        ;  specials.  Used for atoms.
-//                    "&" / "'" /
-//                    "*" / "+" /
-//                    "-" / "/" /
-//                    "=" / "?" /
-//                    "^" / "_" /
-//                    "`" / "{" /
-//                    "|" / "}" /
-//                    "~"
-
-PARSER_RULE(AText, Alternatives(ALPHA(), DIGIT(), CharVal<'!', '#', '$', '%', '&', '\'', '*', '+', '-', '/', '=', '?', '^', '_', '`', '{', '|', '}', '~'>()));
+PARSER_RULE(AText, Alternatives(ALPHA(), DIGIT(), CharVal< // atext           =   ALPHA / DIGIT /    ; Printable US-ASCII
+                                '!', '#',                  //                    "!" / "#" /        ;  characters not including
+                                '$', '%',                  //                    "$" / "%" /        ;  specials.  Used for atoms.
+                                '&', '\'',                 //                    "&" / "'" /
+                                '*', '+',                  //                    "*" / "+" /
+                                '-', '/',                  //                    "-" / "/" /
+                                '=', '?',                  //                    "=" / "?" /
+                                '^', '_',                  //                    "^" / "_" /
+                                '`', '{',                  //                    "`" / "{" /
+                                '|', '}',                  //                    "|" / "}" /
+                                '~'>()));                  //                    "~"
 
 // ctext           =   %d33-39 /          ; Printable US-ASCII
 //                     %d42-91 /          ;  characters not including
@@ -38,7 +36,7 @@ PARSER_RULE(CText, Alternatives(CharRange<33, 39>(), CharRange<42, 91>(), CharRa
 // dtext           =  %d33-90 /          ; Printable US-ASCII
 //                    %d94-126 /         ;  characters not including
 //                    obs-dtext          ;  "[", "]", or "\"
-PARSER_RULE(DText, Alternatives(CharRange<33, 90>(), CharRange<94, 126>()))
+PARSER_RULE(DText, Alternatives(CharRange<33, 90>(), CharRange<94, 126>()));
 
 // specials        =   "(" / ")" /        ; Special characters that do
 //                     "<" / ">" /        ;  not appear in atext
@@ -47,7 +45,7 @@ PARSER_RULE(DText, Alternatives(CharRange<33, 90>(), CharRange<94, 126>()))
 //                     "@" / "\" /
 //                     "," / "." /
 //                     DQUOTE
-PARSER_RULE(Specials, CharVal<'(', ')', '<', '>', '[', ']', ':', ';', '@', '\\', ',', '.', '\"'>())
+PARSER_RULE(Specials, CharVal<'(', ')', '<', '>', '[', ']', ':', ';', '@', '\\', ',', '.', '\"'>());
 
 // qtext           =   %d33 /             ; Printable US-ASCII
 //                     %d35-91 /          ;  characters not including
@@ -58,41 +56,41 @@ PARSER_RULE(QText, Alternatives(CharVal<33>(), CharRange<35, 91>(), CharRange<93
 // 3.2.2.  Folding White Space and Comments
 
 // FWS             =   ([*WSP CRLF] 1*WSP) /  obs-FWS
-PARSER_RULE(FWS, Sequence(Optional(Repeat(WSP()), CRLF()), Repeat<1>(WSP())))
+PARSER_RULE(FWS, Sequence(Optional(Repeat(WSP()), CRLF()), Repeat<1>(WSP())));
 
 // quoted-pair     = ("\" (VCHAR / WSP))
-PARSER_RULE(QuotedPair, Sequence(CharVal<'\\'>(), Alternatives(VCHAR(), WSP())))
+PARSER_RULE(QuotedPair, Sequence(CharVal<'\\'>(), Alternatives(VCHAR(), WSP())));
 
 PARSER_RULE_FORWARD(CContent)
 
 // comment         =   "(" *([FWS] ccontent) [FWS] ")"
-PARSER_RULE(Comment, Sequence(CharVal<'('>(), Repeat(Optional(FWS()), CContent()), Optional(FWS()), CharVal<')'>()))
+PARSER_RULE(Comment, Sequence(CharVal<'('>(), Repeat(Optional(FWS()), CContent()), Optional(FWS()), CharVal<')'>()));
 
 // ccontent        =   ctext / quoted-pair / comment
-PARSER_RULE_PARTIAL(CContent, Alternatives(CText(), QuotedPair(), Comment()))
+PARSER_RULE_PARTIAL(CContent, Alternatives(CText(), QuotedPair(), Comment()));
 
 // CFWS            =   (1*([FWS] comment) [FWS]) / FWS
-PARSER_RULE(CFWS, Alternatives(Repeat<1>(Optional(FWS()), Comment()), Optional(FWS()), FWS()))
+PARSER_RULE(CFWS, Alternatives(Repeat<1>(Optional(FWS()), Comment()), Optional(FWS()), FWS()));
 
 // atom            =   [CFWS] 1*atext [CFWS]
-PARSER_RULE(Atom, Sequence(Optional(CFWS()), Repeat<1>(AText()), Optional(CFWS())))
+PARSER_RULE(Atom, Sequence(Optional(CFWS()), Repeat<1>(AText()), Optional(CFWS())));
 
 // dot-atom-text   =   1*atext *("." 1*atext)
-PARSER_RULE(DotAtomText, Sequence(Repeat<1>(AText()), Repeat(CharVal<'.'>(), Repeat<1>(AText()))))
+PARSER_RULE(DotAtomText, Sequence(Repeat<1>(AText()), Repeat(CharVal<'.'>(), Repeat<1>(AText()))));
 
 // dot-atom        =   [CFWS] dot-atom-text [CFWS]
-PARSER_RULE(DotAtom, Sequence(Optional(CFWS()), DotAtomText(), Optional(CFWS())))
+PARSER_RULE(DotAtom, Sequence(Optional(CFWS()), DotAtomText(), Optional(CFWS())));
 
 // qcontent        =   qtext / quoted-pair
-PARSER_RULE(QContent, Alternatives(QText(), QuotedPair()))
+PARSER_RULE(QContent, Alternatives(QText(), QuotedPair()));
 
-// quoted-string   =   [CFWS]
-//                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
-//                     [CFWS]
+
+
+
 PARSER_RULE(QuotedString, Sequence(
-    Idx<TextWithCommFields_CommentBefore>(), Optional(CFWS()),
-    DQUOTE(), Idx<TextWithCommFields_Content>(), Sequence(Repeat(Optional(FWS()), QContent()), Optional(FWS())), DQUOTE(),
-    Idx<TextWithCommFields_CommentAfter>(), Optional(CFWS())))
+    Optional(CFWS()),                                                                   // quoted-string   =   [CFWS]
+    DQUOTE(), Sequence(Repeat(Optional(FWS()), QContent()), Optional(FWS())), DQUOTE(), //                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
+    Optional(CFWS())));                                                                 //                     [CFWS]
 
 // 3.2.5.  Miscellaneous Tokens
 
@@ -100,59 +98,54 @@ PARSER_RULE(QuotedString, Sequence(
 PARSER_RULE(Word, Alternatives(Atom(), QuotedString()));
 
 // phrase          =   1*word / obs-phrase
-PARSER_RULE(Phrase, Repeat<1>(Word()))
+PARSER_RULE(Phrase, Repeat<1>(Word()));
 
 // display-name    =   phrase
-PARSER_RULE(DisplayName, Phrase())
+PARSER_RULE(DisplayName, Phrase());
 
 // 3.4.1.  Addr-Spec Specification
 
 // local-part      =   dot-atom / quoted-string / obs-local-part
-PARSER_RULE(LocalPart, Alternatives(DotAtom(), QuotedString()))
+PARSER_RULE(LocalPart, Alternatives(DotAtom(), QuotedString()));
 
 // domain-literal  =   [CFWS] "[" *([FWS] dtext) [FWS] "]" [CFWS]
 PARSER_RULE(DomainLiteral, Sequence(
-    Idx<TextWithCommFields_CommentBefore>(), Optional(CFWS()),
-    CharVal<'['>(),
-    Idx<TextWithCommFields_Content>(), Sequence(Repeat(Optional(FWS()), DText()), Optional(FWS())),
-    CharVal<']'>(),
-    Idx<TextWithCommFields_CommentAfter>(), Optional(CFWS())))
+    Optional(CFWS()), CharVal<'['>(), Sequence(Repeat(Optional(FWS()), DText()), Optional(FWS())), CharVal<']'>(), Optional(CFWS())));
 
 // domain          =   dot-atom / domain-literal / obs-domain
-PARSER_RULE(Domain, Alternatives(DotAtom(), DomainLiteral()))
+PARSER_RULE(Domain, Alternatives(DotAtom(), DomainLiteral()));
 
 // addr-spec       =   local-part "@" domain
 PARSER_RULE_DATA(AddrSpec, Sequence(
-    Idx<AddrSpecFields_LocalPart>(), LocalPart(), CharVal<'@'>(), Idx<AddrSpecFields_DomainPart>(), Domain()))
+    LocalPart(), CharVal<'@'>(), Domain()));
 
 // 3.4.  Address Specification
 
 // angle-addr      =   [CFWS] "<" addr-spec ">" [CFWS] /
 //                 obs-angle-addr
 PARSER_RULE_DATA(AngleAddr, Sequence(
-    Idx<AngleAddrFields_CommentBefore>(), Optional(CFWS()), CharVal<'<'>(), Idx<AngleAddrFields_Content>(), AddrSpec(), CharVal<'>'>(), Idx<AngleAddrFields_CommentAfter>(), Optional(CFWS())))
+    Optional(CFWS()), CharVal<'<'>(), AddrSpec(), CharVal<'>'>(), Optional(CFWS())));
 
 // name-addr       =   [display-name] angle-addr
-PARSER_RULE_DATA(NameAddr, Sequence(Optional(DisplayName()), AngleAddr()))
+PARSER_RULE_DATA(NameAddr, Sequence(Optional(DisplayName()), AngleAddr()));
 
 // mailbox         =   name-addr / addr-spec
-PARSER_RULE_DATA(Mailbox, Alternatives(Idx<MailboxFields_NameAddr>(), NameAddr(), Idx<MailboxFields_AddrSpec>(), AddrSpec()))
+PARSER_RULE_DATA(Mailbox, Union(NameAddr(), AddrSpec()));
 
 // mailbox-list    =   (mailbox *("," mailbox)) / obs-mbox-list
-PARSER_RULE_DATA(MailboxList, Sequence(
-    Idx<INDEX_THIS>(), Head(Mailbox()), Idx<INDEX_THIS>(), Repeat(Sequence(CharVal<','>(), Idx<INDEX_THIS>(), Mailbox()))))
+PARSER_RULE_DATA(MailboxList, HeadTail(Mailbox(), CharVal<','>(), Idx<INDEX_THIS>(), Mailbox()));
 
 // group-list      =   mailbox-list / CFWS / obs-group-list
-PARSER_RULE_DATA(GroupList, Alternatives(Idx<GroupListFields_Mailboxes>(), MailboxList(), Idx<GroupListFields_Comment>(), CFWS()))
+PARSER_RULE_DATA(GroupList, Union(MailboxList(), CFWS()));
 
 // group           =   display-name ":" [group-list] ";" [CFWS]
 PARSER_RULE_DATA(Group, Sequence(
-    Idx<GroupFields_DisplayName>(), DisplayName(), CharVal<':'>(), Idx<GroupFields_GroupList>(), GroupList(), CharVal<';'>(), Idx<GroupFields_Comment>(), Optional(CFWS())))
+    DisplayName(), CharVal<':'>(), GroupList(), CharVal<';'>(), Optional(CFWS())));
 
 // address         =   mailbox / group
-PARSER_RULE_DATA(Address, Alternatives(Idx<AddressFields_Mailbox>(), Mailbox(), Idx<AddressFields_Group>(), Group()))
+PARSER_RULE_DATA(Address, Union(Mailbox(), Group()));
 
 // address-list    =   (address *("," address)) / obs-addr-list
-PARSER_RULE_DATA(AddressList, Sequence(Idx<INDEX_THIS>(), Head(Address()), Idx<INDEX_THIS>(),
-    Repeat(CharVal<','>(), Idx<INDEX_THIS>(), Address())))
+PARSER_RULE_DATA(AddressList, HeadTail(Address(), CharVal<','>(), Idx<INDEX_THIS>(), Address()));
+
 }
