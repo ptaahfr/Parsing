@@ -13,11 +13,11 @@
 namespace RFC5234Core
 {
     // ALPHA          =  %x41-5A / %x61-7A   ; A-Z / a-z
-    PARSER_RULE(ALPHA, CharPred([] (auto ch) { return ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z'; }));
+    PARSER_RULE_CHARPRED(ALPHA, [] (auto ch) { return ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z'; });
     // BIT            =  "0" / "1"
-    PARSER_RULE(BIT, CharPred([] (auto ch) { return ch == '0' || ch == '1'; }));
+    PARSER_RULE_CHARPRED(BIT, [] (auto ch) { return ch == '0' || ch == '1'; });
     // CHAR           =  %x01-7F
-    PARSER_RULE(CHAR, CharPred([] (auto ch) { return ch >= 1 && ch <= 0x7f; }));
+    PARSER_RULE_CHARPRED(CHAR, [] (auto ch) { return ch >= 1 && ch <= 0x7f; });
     // LF             =  %x0A
     PARSER_RULE(LF, CharExact('\n'));
     // CR             =  %x0D
@@ -25,19 +25,19 @@ namespace RFC5234Core
     // CRLF           =  CR LF
     PARSER_RULE(CRLF, Sequence(CR(), LF()));
     // CTL            =  %x00-1F / %x7F
-    PARSER_RULE(CTL, CharPred([] (auto ch) { return ch >= 0x00 && ch <= 0x1f || ch == 0x7f; }));
+    PARSER_RULE_CHARPRED(CTL, [] (auto ch) { return ch >= 0x00 && ch <= 0x1f || ch == 0x7f; });
     // DIGIT          =  %x30-39
-    PARSER_RULE(DIGIT, CharPred([] (auto ch) { return ch >= '0' && ch <= '9'; }));
+    PARSER_RULE_CHARPRED(DIGIT, [] (auto ch) { return ch >= '0' && ch <= '9'; });
     // HEXDIG         =  DIGIT / "A" / "B" / "C" / "D" / "E" / "F"
-    PARSER_RULE(HEXDIG, CharPred([] (auto ch) { return ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'F'; }));
+    PARSER_RULE_CHARPRED(HEXDIG, [] (auto ch) { return ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'F'; });
     // HTAB           =  %x09
     PARSER_RULE(HTAB, CharExact('\t'));
     // OCTET          =  %x00-FF
-    PARSER_RULE(OCTET, CharPred([] (auto ch) { return ch >= 0 && ch <= 255; }));
+    PARSER_RULE_CHARPRED(OCTET, [] (auto ch) { return ch >= 0 && ch <= 255; });
     // SP             =  %x20
-    PARSER_RULE(SP, CharPred([] (auto ch) { return ch == ' '; }));
+    PARSER_RULE(SP, CharExact(' '));
     // VCHAR          =  %x21-7E
-    PARSER_RULE(VCHAR, CharPred([] (auto ch) { return ch >= 0x21 && ch <= 0x7e; }));
+    PARSER_RULE_CHARPRED(VCHAR, [] (auto ch) { return ch >= 0x21 && ch <= 0x7e; });
     // WSP            =  SP / HTAB
     PARSER_RULE(WSP, Alternatives(SP(), HTAB()));
     // LWSP           =  *(WSP / CRLF WSP)

@@ -91,16 +91,47 @@ void ParseABNF()
 #endif
 }
 
+void test_grammar()
+{
+    using namespace RFC5234Core;
+
+    //std::cout << IsConstant(CR()) << std::endl;
+    //std::cout << IsConstant(Sequence(CR())) << std::endl;
+    //std::cout << IsConstant(Sequence(Repeat<10, 10>(CRLF()))) << std::endl;
+    //std::cout << IsConstant(Sequence(Repeat<1>(DIGIT()))) << std::endl;
+
+    return;
+}
+
+void TestRFC5322()
+{
+#define TEST_RULE(type, name, str) \
+    { \
+        type nameResult; \
+        auto parser(Make_ParserFromString(std::string(str))); \
+        if (!Parse(parser, &nameResult, name()) || !parser.Ended()) \
+            std::cout << "Parsing rule " << #name << " failed" << std::endl; \
+        else \
+            std::cout << "Parsing rule " << #name << " succeed" << std::endl; \
+    }
+
+    using namespace RFC5322;
+
+    TEST_RULE(TextWithCommData, DotAtom, "local");
+    TEST_RULE(AddrSpecData, AddrSpec, "local@domain");
+    TEST_RULE(AngleAddrData, AngleAddr, "<local@domain> (comment)");
+    TEST_RULE(TextWithCommData, Atom, "bllabla ");
+    TEST_RULE(MultiTextWithCommData, DisplayName, "bllabla (comment) blabla");
+    TEST_RULE(NameAddrData, NameAddr, "mrs johns <local@domain> (comment)");
+
+    return;
+}
+
 void test_address(std::string const & addr)
 {
     std::cout << addr;
 
-    auto parser(Make_Parser([&, pos = (size_t)0] () mutable
-    {
-        if (pos < addr.size())
-            return (int)addr[pos++];
-        return EOF;
-    }, (char)0));
+    auto parser(Make_ParserFromString(addr));
 
     using namespace RFC5322;
 
@@ -161,6 +192,10 @@ void test_address(std::string const & addr)
 
 int main()
 {
+    TestRFC5322();
+
+    test_grammar();
+
     ParseABNF();
 
     test_address("troll@bitch.com, arobar     d <sigma@addr.net>, sir john snow <user.name+tag+sorting@example.com(comment)>");

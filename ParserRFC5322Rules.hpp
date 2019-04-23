@@ -27,7 +27,7 @@ using namespace RFC5234Core;
 //                    "|" / "}" /
 //                    "~"
 
-PARSER_RULE(AText, CharPred([](auto ch)
+PARSER_RULE_CHARPRED(AText, [](auto ch)
 {
     if (ch >= 'a' && ch <= 'z')
         return true;
@@ -36,13 +36,13 @@ PARSER_RULE(AText, CharPred([](auto ch)
     if (ch >= '0' && ch <= '9')
         return true;
     return std::string("!#$%&\'*+-/=?^_`{|}~").find(ch) != std::string::npos;
-}))
+})
 
 // ctext           =   %d33-39 /          ; Printable US-ASCII
 //                     %d42-91 /          ;  characters not including
 //                     %d93-126 /         ;  "(", ")", or "\"
 //                     obs-ctext
-PARSER_RULE(CText, CharPred([](auto ch)
+PARSER_RULE_CHARPRED(CText, [](auto ch)
 {
     if (ch >= 33 && ch <= 39)
         return true;
@@ -51,15 +51,15 @@ PARSER_RULE(CText, CharPred([](auto ch)
     if (ch >= 93 && ch <= 126)
         return true;
     return false;
-}))
+})
 
 // dtext           =  %d33-90 /          ; Printable US-ASCII
 //                    %d94-126 /         ;  characters not including
 //                    obs-dtext          ;  "[", "]", or "\"
-PARSER_RULE(DText, CharPred([](auto ch)
+PARSER_RULE_CHARPRED(DText, [](auto ch)
 {
     return (ch >= 33 && ch <= 90) || (ch >= 94 && ch <= 126);
-}))
+})
 
 // specials        =   "(" / ")" /        ; Special characters that do
 //                     "<" / ">" /        ;  not appear in atext
@@ -68,16 +68,16 @@ PARSER_RULE(DText, CharPred([](auto ch)
 //                     "@" / "\" /
 //                     "," / "." /
 //                     DQUOTE
-PARSER_RULE(Specials, CharPred([](auto ch)
+PARSER_RULE_CHARPRED(Specials, [](auto ch)
 {
     return std::string("()<>[]:;@\\,/\"").find(ch) != std::string::npos;
-}))
+})
 
 // qtext           =   %d33 /             ; Printable US-ASCII
 //                     %d35-91 /          ;  characters not including
 //                     %d93-126 /         ;  "\" or the quote character
 //                     obs-qtext
-PARSER_RULE(QText, CharPred([](auto ch) { return ch == 33 || (ch >= 35 && ch <= 91) || (ch >= 93 && ch <= 126); }))
+PARSER_RULE_CHARPRED(QText, [](auto ch) { return ch == 33 || (ch >= 35 && ch <= 91) || (ch >= 93 && ch <= 126); })
 
 // 3.2.2.  Folding White Space and Comments
 
@@ -178,5 +178,5 @@ PARSER_RULE_DATA(Address, Alternatives(Idx<AddressFields_Mailbox>(), Mailbox(), 
 
 // address-list    =   (address *("," address)) / obs-addr-list
 PARSER_RULE_DATA(AddressList, Sequence(Idx<INDEX_THIS>(), Head(Address()), Idx<INDEX_THIS>(),
-    Repeat(Sequence(Idx<INDEX_NONE>(), CharExact(','), Idx<INDEX_THIS>(), Address()))))
+    Repeat(Idx<INDEX_NONE>(), CharExact(','), Idx<INDEX_THIS>(), Address())))
 }

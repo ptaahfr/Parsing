@@ -16,7 +16,7 @@ enum TextWithCommFields
     TextWithCommFields_CommentAfter
 };
 
-using MultiTextWithComm = std::vector<TextWithCommData>;
+using MultiTextWithCommData = std::vector<TextWithCommData>;
 
 using AddrSpecData = std::tuple<TextWithCommData, TextWithCommData>; // LocalPart, DomainPart
 enum AddrSpecFields
@@ -33,7 +33,7 @@ enum AngleAddrFields
     AngleAddrFields_CommentAfter
 };
 
-using NameAddrData = std::tuple<MultiTextWithComm, AngleAddrData>; // DisplayName, Address
+using NameAddrData = std::tuple<MultiTextWithCommData, AngleAddrData>; // DisplayName, Address
 enum NameAddrFields
 {
     NameAddrFields_DisplayName,
@@ -56,7 +56,7 @@ enum GroupListFields
     GroupListFields_Comment
 };
 
-using GroupData = std::tuple<MultiTextWithComm, GroupListData, SubstringPos>; // DisplayName, GroupList, Comment
+using GroupData = std::tuple<MultiTextWithCommData, GroupListData, SubstringPos>; // DisplayName, GroupList, Comment
 enum GroupFields
 {
     GroupFields_DisplayName,
@@ -91,7 +91,7 @@ std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, boo
 }
 
 template <typename CHAR_TYPE>
-std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, bool withComments, MultiTextWithComm const & text)
+std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, bool withComments, MultiTextWithCommData const & text)
 {
     std::basic_string<CHAR_TYPE> result;
     for (auto const & part : text)
