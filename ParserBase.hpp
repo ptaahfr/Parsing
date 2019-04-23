@@ -306,7 +306,7 @@ public:
 };
 
 
-// Sequence try to parse consecutive primitives in the current object's consecutive members
+// Sequence try to parse consecutive primitives in the current object's consecutive members or in the current object if there is only one variable primitive
 template <typename... PRIMITIVES>
 inline SequenceType<SeqTypeSeq, PRIMITIVES...> Sequence(PRIMITIVES... primitives)
 {
@@ -320,7 +320,7 @@ inline SequenceType<SeqTypeAlt, PRIMITIVES...> Alternatives(PRIMITIVES... primit
     return SequenceType<SeqTypeAlt, PRIMITIVES...>(primitives...);
 }
 
-// Union try to parse different primitive in the current object's consecutive members
+// Union try to parse different primitive in the current object's consecutive members or in the current object if there is only one variable primitive
 template <typename... PRIMITIVES>
 inline SequenceType<SeqTypeUnion, PRIMITIVES...> Union(PRIMITIVES... primitives)
 {
@@ -392,6 +392,15 @@ inline auto IsConstant(SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> 
 
 template <size_t FIXED_COUNT, typename PRIMITIVE>
 inline auto IsConstant(RepeatType<FIXED_COUNT, FIXED_COUNT, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
+
+template <typename SEQ_TYPE, typename PRIMITIVE>
+inline auto CountVariable(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence)
+-> std::integral_constant<size_t, (std::remove_reference_t<decltype(IsConstant(std::declval<PRIMITIVE>()))>::value ? 0 : 1)>;
+
+template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, std::enable_if_t<(sizeof...(OTHER_PRIMITIVES) > 0), void *> = nullptr>
+inline auto CountVariable(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+-> std::integral_constant<size_t, ((std::remove_reference_t<decltype(IsConstant(std::declval<PRIMITIVE>()))>::value ? 0 : 1)
+                                  + std::remove_reference_t<decltype(CountVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>::value)>;
 
 template <size_t IDX>
 class Idx {};
@@ -515,7 +524,9 @@ namespace Impl
     template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 1), void *> = nullptr>
     inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
-        enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE : (SEQ_TYPE::value == SeqTypeAlt::value ? INDEX_THIS : IMPLICIT_INDEX) };
+        enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE :
+            (((SEQ_TYPE::value == SeqTypeAlt::value )
+                || (std::remove_reference_t<decltype(CountVariable(what))>::value <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
         return Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
     }
 
@@ -545,7 +556,10 @@ namespace Impl
     template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> >
     inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
-        enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE : (SEQ_TYPE::value == SeqTypeAlt::value ? INDEX_THIS : IMPLICIT_INDEX) };
+        enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE :
+            (((SEQ_TYPE::value == SeqTypeAlt::value )
+                || (std::remove_reference_t<decltype(CountVariable(what))>::value <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
+
         enum { NEXT_IMPLICIT_INDEX = (INDEX == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX) };
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);

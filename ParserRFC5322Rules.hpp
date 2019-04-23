@@ -133,7 +133,7 @@ PARSER_RULE_DATA(NameAddr, Sequence(Optional(DisplayName()), AngleAddr()));
 PARSER_RULE_DATA(Mailbox, Union(NameAddr(), AddrSpec()));
 
 // mailbox-list    =   (mailbox *("," mailbox)) / obs-mbox-list
-PARSER_RULE_DATA(MailboxList, HeadTail(Mailbox(), CharVal<','>(), Idx<INDEX_THIS>(), Mailbox()));
+PARSER_RULE_DATA(MailboxList, HeadTail(Mailbox(), CharVal<','>(), Mailbox()));
 
 // group-list      =   mailbox-list / CFWS / obs-group-list
 PARSER_RULE_DATA(GroupList, Union(MailboxList(), CFWS()));
@@ -146,6 +146,6 @@ PARSER_RULE_DATA(Group, Sequence(
 PARSER_RULE_DATA(Address, Union(Mailbox(), Group()));
 
 // address-list    =   (address *("," address)) / obs-addr-list
-PARSER_RULE_DATA(AddressList, HeadTail(Address(), CharVal<','>(), Idx<INDEX_THIS>(), Address()));
+PARSER_RULE_DATA(AddressList, HeadTail(Address(), CharVal<','>(), Address()));
 
 }
