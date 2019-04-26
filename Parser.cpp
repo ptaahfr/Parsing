@@ -7,6 +7,8 @@
 #pragma warning(disable: 4503)
 #endif
 
+#define PARSER_LF_AS_CRLF
+
 #include "ParserBase.hpp"
 #include "ParserCore.hpp"
 #include <algorithm>
@@ -46,64 +48,68 @@ void TestRFC5234()
     TEST_RULE(ElementsData, elements, "*c-wsp \"/\" *c-wsp concatenation");
     TEST_RULE(ElementsData, elements, "*(*c-wsp \"/\" *c-wsp concatenation)");
     TEST_RULE(ElementsData, elements, "concatenation\r\n *(*c-wsp \"/\" *c-wsp concatenation)");
+    TEST_RULE(ElementsData, elements, "concatenation\r\n *(<test <\"string>)");
+    TEST_RULE(RuleData, rule, "rule1 = concatenation\r\n *(<test <\"string>)\r\n");
+    TEST_RULE(SubstringPos, c_nl, "\r\n");
+    TEST_RULE(RuleData, rule, R"ABNF(defined-as     =  *c-wsp
+)ABNF");
 }
 
 void ParseABNF()
 {
     std::string ABNFRulesABNF = R"ABNF(
-         defined-as     =  *c-wsp ("=" / "=/") *c-wsp
-                                ; basic rules definition and
-                                ;  incremental alternatives
+defined-as     =  *c-wsp ("=" / "=/") *c-wsp
+                    ; basic rules definition and
+                    ;  incremental alternatives
 
-         elements       =  alternation *c-wsp
+elements       =  alternation *c-wsp
 
-         c-wsp          =  WSP / (c-nl WSP)
+c-wsp          =  WSP / (c-nl WSP)
 
-         c-nl           =  comment / CRLF
-                                ; comment or newline
+c-nl           =  comment / CRLF
+                    ; comment or newline
 
-         comment        =  ";" *(WSP / VCHAR) CRLF
+comment        =  ";" *(WSP / VCHAR) CRLF
 
-         alternation    =  concatenation
-                           *(*c-wsp "/" *c-wsp concatenation)
+alternation    =  concatenation
+                *(*c-wsp "/" *c-wsp concatenation)
 
-         concatenation  =  repetition *(1*c-wsp repetition)
+concatenation  =  repetition *(1*c-wsp repetition)
 
-         repetition     =  [repeat] element
+repetition     =  [repeat] element
 
-         repeat         =  1*DIGIT / (*DIGIT "*" *DIGIT)
+repeat         =  1*DIGIT / (*DIGIT "*" *DIGIT)
 
-         element        =  rulename / group / option /
-                           char-val / num-val / prose-val
+element        =  rulename / group / option /
+                char-val / num-val / prose-val
 
-         group          =  "(" *c-wsp alternation *c-wsp ")"
+group          =  "(" *c-wsp alternation *c-wsp ")"
 
-         option         =  "[" *c-wsp alternation *c-wsp "]"
+option         =  "[" *c-wsp alternation *c-wsp "]"
 
-         char-val       =  DQUOTE *(%x20-21 / %x23-7E) DQUOTE
-                                ; quoted string of SP and VCHAR
-                                ;  without DQUOTE
+char-val       =  DQUOTE *(%x20-21 / %x23-7E) DQUOTE
+                    ; quoted string of SP and VCHAR
+                    ;  without DQUOTE
 
-         num-val        =  "%" (bin-val / dec-val / hex-val)
+num-val        =  "%" (bin-val / dec-val / hex-val)
 
-         bin-val        =  "b" 1*BIT
-                           [ 1*("." 1*BIT) / ("-" 1*BIT) ]
-                                ; series of concatenated bit values
-                                ;  or single ONEOF range
+bin-val        =  "b" 1*BIT
+                [ 1*("." 1*BIT) / ("-" 1*BIT) ]
+                    ; series of concatenated bit values
+                    ;  or single ONEOF range
 
-         dec-val        =  "d" 1*DIGIT
-                           [ 1*("." 1*DIGIT) / ("-" 1*DIGIT) ]
+dec-val        =  "d" 1*DIGIT
+                [ 1*("." 1*DIGIT) / ("-" 1*DIGIT) ]
 
-         hex-val        =  "x" 1*HEXDIG
-                           [ 1*("." 1*HEXDIG) / ("-" 1*HEXDIG) ]
+hex-val        =  "x" 1*HEXDIG
+                [ 1*("." 1*HEXDIG) / ("-" 1*HEXDIG) ]
 
-         prose-val      =  "<" *(%x20-3D / %x3F-7E) ">"
-                                ; bracketed string of SP and VCHAR
-                                ;  without angles
-                                ; prose description, to be used as
-                                ;  last resort
+prose-val      =  "<" *(%x20-3D / %x3F-7E) ">"
+                    ; bracketed string of SP and VCHAR
+                    ;  without angles
+                    ; prose description, to be used as
+                    ;  last resort
 )ABNF";
-
     using namespace RFC5234ABNF;
 
     auto parser(Make_ParserFromString(ABNFRulesABNF));
@@ -113,6 +119,13 @@ void ParseABNF()
     {
         std::cout << "Rules parsed !" << std::endl;
     }
+
+    for (auto const & parseError : parser.Errors())
+    {
+        std::cerr << "Parsing error at " << std::get<0>(parseError) << ":" << std::get<1>(parseError) << std::endl;
+    }
+
+    return;
 }
 
 void TestRFC5322()
@@ -146,7 +159,6 @@ void test_address(std::string const & addr)
     std::cout << addr;
 
     auto parser(Make_ParserFromString(addr));
-
     using namespace RFC5322;
 
     AddressListData addresses;
@@ -200,6 +212,11 @@ void test_address(std::string const & addr)
     {
         std::cout << " is NOK\n";
     }
+    
+    //for (auto const & parseError : parser.Errors())
+    //{
+    //    std::cerr << "Parsing error at " << std::get<0>(parseError) << ":" << std::get<1>(parseError) << std::endl;
+    //}
 
     std::cout << std::endl;
 }

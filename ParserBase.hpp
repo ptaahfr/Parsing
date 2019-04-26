@@ -401,9 +401,9 @@ inline auto CountVariable(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...>
 template <typename INPUT, typename CHAR_TYPE>
 class ParserIO
 {
-private:
     Impl::InputAdapter<INPUT> input_;
     Impl::OutputAdapter<CHAR_TYPE> output_;
+    std::vector<std::pair<size_t, size_t> > errors_;
 public:
     inline ParserIO(INPUT input)
         : input_(input)
@@ -414,6 +414,8 @@ public:
     inline bool Ended() { return input_() == EOF; }
     inline Impl::InputAdapter<INPUT> & Input() { return input_; }
     inline Impl::OutputAdapter<CHAR_TYPE> & Output() { return output_; }
+    inline std::vector<std::pair<size_t, size_t> > const & Errors() const { return errors_; }
+    inline std::vector<std::pair<size_t, size_t> > & Errors() { return errors_; }
 
 public:
     template <bool ALT, typename RESULT_PTR>
@@ -462,8 +464,8 @@ public:
             *result = newResult;
         }
     public:
-        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, RESULT_PTR result)
-            : Base(input, output, nullptr), previousState_(GetPreviousState(result)), result_(result)
+        inline SavedIOState(ParserIO & parent, RESULT_PTR result)
+            : Base(parent, nullptr), previousState_(GetPreviousState(result)), result_(result)
         {
         }
 
@@ -477,18 +479,18 @@ public:
 
         inline bool Success()
         {
-            SetResult(result_, SubstringPos(this->outputPos_, this->output_.Pos()));
+            SetResult(result_, SubstringPos(this->outputPos_, this->parent_.Output().Pos()));
             return Base::Success();
         }
 
-        inline void Maybe() const
+        inline void SetPossibleMatch() const
         {
-            return Base::Maybe();
+            return Base::SetPossibleMatch();
         }
 
-        inline bool Possible() const
+        inline bool HasPossibleMatch() const
         {
-            return Base::Possible();
+            return Base::HasPossibleMatch();
         }
 
     protected:
@@ -502,25 +504,27 @@ public:
     class SavedIOState<false, nullptr_t>
     {
     protected:
-        Impl::InputAdapter<INPUT> & input_;
-        Impl::OutputAdapter<CHAR_TYPE> & output_;
+        ParserIO & parent_;
         size_t inputPos_;
         size_t outputPos_;
+        size_t errorsSize_;
     public:
-        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, nullptr_t)
-            : input_(input), output_(output), inputPos_(input.Pos()), outputPos_(output.Pos())
+        inline SavedIOState(ParserIO & parent, nullptr_t)
+            : parent_(parent), inputPos_(parent.Input().Pos()), outputPos_(parent.Output().Pos()), errorsSize_(parent.Errors().size())
         {
         }
 
         inline ~SavedIOState()
         {
-            if (inputPos_ != (size_t)-1)
+            if (inputPos_ != (size_t)-1 && outputPos_ != (size_t)-1)
             {
-                input_.SetPos(inputPos_);
+                parent_.Errors().push_back(std::make_pair(inputPos_, parent_.Input().Pos()));
+                parent_.Input().SetPos(inputPos_);
+                parent_.Output().SetPos(outputPos_);
             }
-            if (outputPos_ != (size_t)-1)
+            else
             {
-                output_.SetPos(outputPos_);
+                parent_.Errors().resize(errorsSize_);
             }
         }
 
@@ -531,11 +535,11 @@ public:
             return true;
         }
 
-        inline void Maybe() const
+        inline void SetPossibleMatch() const
         {
         }
 
-        inline bool Possible() const
+        inline bool HasPossibleMatch() const
         {
             return false;
         }
@@ -580,39 +584,39 @@ public:
         }
 
     public:
-        inline void Maybe()
+        inline void SetPossibleMatch()
         {
-            size_t length(this->input_.Pos() - this->inputPos_);
+            size_t length(this->parent_.Input().Pos() - this->inputPos_);
             if (length > bestLength_)
             {
                 bestLength_ = length;
-                bestOutputPos_ = this->output_.Pos();
-                bestInputPos_ = this->input_.Pos();
+                bestOutputPos_ = parent_.Output().Pos();
+                bestInputPos_ = parent_.Input().Pos();
                 SaveAlternative(PtrToBestAlternative(bestAlternative_), this->Result());
                 // resets to the initial state to parse another alternative
                 this->~SavedIOState();
             }
         }
 
-        inline bool Possible() const
+        inline bool HasPossibleMatch() const
         {
             return bestLength_ > 0;
         }
 
         inline bool Success()
         {
-            size_t length(this->input_.Pos() - this->inputPos_);
+            size_t length(this->parent_.Input().Pos() - this->inputPos_);
             if (length < bestLength_)
             {
-                this->output_.SetPos(bestOutputPos_);
-                this->input_.SetPos(bestInputPos_);
+                this->parent_.Output().SetPos(bestOutputPos_);
+                this->parent_.Input().SetPos(bestInputPos_);
                 SaveAlternative(this->Result(), PtrToBestAlternative(bestAlternative_));
             }
             return Base::Success();
         }
     public:
-        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, RESULT_PTR result)
-            : Base(input, output, result)
+        inline SavedIOState(ParserIO & parent, RESULT_PTR result)
+            : Base(parent, result)
         {
         }
     };
@@ -620,7 +624,7 @@ public:
     template <bool ALT, typename RESULT_PTR>
     inline SavedIOState<ALT, RESULT_PTR> Save(RESULT_PTR & result)
     {
-        return SavedIOState<ALT, RESULT_PTR>(input_, output_, result);
+        return SavedIOState<ALT, RESULT_PTR>(*this, result);
     }
 };
 
@@ -633,10 +637,12 @@ inline ParserIO<INPUT, CHAR_TYPE> Make_Parser(INPUT && input, CHAR_TYPE charType
 template <typename CHAR_TYPE>
 inline auto Make_ParserFromString(std::basic_string<CHAR_TYPE> const & str)
 {
-    return Make_Parser([str, pos = (size_t)0] () mutable
+    return Make_Parser([=, pos = (size_t)0] () mutable
     {
         if (pos < str.size())
+        {
             return (int)str[pos++];
+        }
         return EOF;
     }, (CHAR_TYPE)0);
 }
@@ -694,12 +700,13 @@ namespace Impl
         auto const & nextElement(std::get<OFFSET + 1>(what.Primitives()));
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
-        ioState.Maybe();
+        if (result)
+            ioState.SetPossibleMatch();
 
         if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
-            return ParseItem<OFFSET + 2, IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 2>(what.Primitives()), what) || ioState.Possible();
+            return ParseItem<OFFSET + 2, IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 2>(what.Primitives()), what) || ioState.HasPossibleMatch();
         else
-            return ioState.Possible();
+            return ioState.HasPossibleMatch();
     }
 
     template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> >
@@ -712,12 +719,13 @@ namespace Impl
         enum { NEXT_IMPLICIT_INDEX = (INDEX == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX) };
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
-        ioState.Maybe();
-        
+        if (result)
+            ioState.SetPossibleMatch();
+
         if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
-            return ParseItem<OFFSET + 1, NEXT_IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 1>(what.Primitives()), what) || ioState.Possible();
+            return ParseItem<OFFSET + 1, NEXT_IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 1>(what.Primitives()), what) || ioState.HasPossibleMatch();
         else
-            return ioState.Possible();
+            return ioState.HasPossibleMatch();
     }
 }
 
@@ -732,6 +740,50 @@ inline bool Parse(PARSER & parser, DEST_PTR dest, SequenceType<SEQ_TYPE, PRIMITI
     return false;
 }
 
+inline bool IsEmpty(SubstringPos const & sub)
+{
+    return sub.second <= sub.first;
+}
+
+inline bool IsEmpty(nullptr_t)
+{
+    return true;
+}
+
+template <typename ELEM>
+inline bool IsEmpty(std::vector<ELEM> const & arr);
+
+template <size_t OFFSET, typename... ARGS>
+inline bool IsEmpty(std::tuple<ARGS...> const & tuple);
+
+template <typename... ARGS>
+inline bool IsEmpty(std::tuple<ARGS...> const & tuple)
+{
+    return IsEmpty<0>(tuple);
+}
+
+template <size_t OFFSET, typename... ARGS>
+inline bool IsEmpty(std::tuple<ARGS...> const & tuple)
+{
+    enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(ARGS) - 1) };
+    if (false == IsEmpty(std::get<OFFSET>(tuple)))
+        return false;
+    if (NEXT_OFFSET > OFFSET)
+        return IsEmpty<NEXT_OFFSET>(tuple);
+    return true;
+}
+
+template <typename ELEM>
+inline bool IsEmpty(std::vector<ELEM> const & arr)
+{
+    for (auto const & elem : arr)
+    {
+        if (false == IsEmpty(elem))
+            return false;
+    }
+    return true;
+}
+
 template <typename PARSER, typename ELEMS_PTR, size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
 inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & what)
 {
@@ -744,7 +796,8 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_CO
         decltype(Impl::ElemTypeOrNull(elems)) elem = {};
         if (Parse(parser, Impl::PtrOrNull(elem), what.Primitive()))
         {
-            Impl::PushBackIfNotNull(elems, elem);
+            if (false == IsEmpty(elem))
+                Impl::PushBackIfNotNull(elems, elem);
         }
         else
         {
@@ -752,12 +805,11 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_CO
         }
     }
 
-    if (count < MIN_COUNT)
+    if (count >= MIN_COUNT)
     {
-        return false;
+        return ioState.Success();
     }
-
-    return ioState.Success();
+    return false;
 }
 
 template <typename PARSER, typename ELEMS_PTR, typename PRIMITIVE>
@@ -772,44 +824,5 @@ inline std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buff
     subString.first = std::min(subString.first, buffer.size());
     subString.second = std::max(subString.first, std::min(subString.second, buffer.size()));
     return std::basic_string<CHAR_TYPE>(buffer.data() + subString.first, buffer.data() + subString.second);
-}
-
-inline bool IsEmpty(SubstringPos sub)
-{
-    return sub.second <= sub.first;
-}
-
-template <typename ELEM>
-inline bool IsEmpty(std::vector<ELEM> arr);
-
-template <size_t OFFSET, typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> tuple);
-
-template <typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> tuple)
-{
-    return IsEmpty<0>(tuple);
-}
-
-template <size_t OFFSET, typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> tuple)
-{
-    enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(ARGS) - 1) };
-    if (false == IsEmpty(std::get<OFFSET>(tuple)))
-        return false;
-    if (NEXT_OFFSET > OFFSET)
-        return IsEmpty<NEXT_OFFSET>(tuple);
-    return true;
-}
-
-template <typename ELEM>
-inline bool IsEmpty(std::vector<ELEM> arr)
-{
-    for (auto const & elem : arr)
-    {
-        if (false == IsEmpty(elem))
-            return false;
-    }
-    return true;
 }
 

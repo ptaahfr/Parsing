@@ -23,7 +23,11 @@ namespace RFC5234Core
     // CR             =  %x0D
     PARSER_RULE(CR, CharVal<0x0D>());
     // CRLF           =  CR LF
+#ifdef PARSER_LF_AS_CRLF
+    PARSER_RULE(CRLF, Alternatives(LF(), Sequence(CR(), LF())));
+#else
     PARSER_RULE(CRLF, Sequence(CR(), LF()));
+#endif
     // CTL            =  %x00-1F / %x7F
     PARSER_RULE(CTL, Alternatives(CharRange<0x00, 0x1F>(), CharVal<0x7F>()))
     // DIGIT          =  %x30-39

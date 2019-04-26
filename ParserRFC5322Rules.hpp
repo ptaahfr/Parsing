@@ -84,9 +84,6 @@ PARSER_RULE(DotAtom, Sequence(Optional(CFWS()), DotAtomText(), Optional(CFWS()))
 // qcontent        =   qtext / quoted-pair
 PARSER_RULE(QContent, Alternatives(QText(), QuotedPair()));
 
-
-
-
 PARSER_RULE(QuotedString, Sequence(
     Optional(CFWS()),                                                                   // quoted-string   =   [CFWS]
     DQUOTE(), Sequence(Repeat(Optional(FWS()), QContent()), Optional(FWS())), DQUOTE(), //                     DQUOTE *([FWS] qcontent) [FWS] DQUOTE
