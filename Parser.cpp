@@ -21,24 +21,31 @@
 { \
     type nameResult; \
     auto parser(Make_ParserFromString(std::string(str))); \
+    std::cout << "Parsing rule " << #name; \
     if (!Parse(parser, &nameResult, name()) || !parser.Ended()) \
-        std::cout << "Parsing rule " << #name << " failed" << std::endl; \
+        std::cout<< " failed" << std::endl; \
     else \
-        std::cout << "Parsing rule " << #name << " succeed" << std::endl; \
+        std::cout << " succeed" << std::endl; \
 }
 
 void TestRFC5234()
 {
     using namespace RFC5234ABNF;
-    TEST_RULE(RepeatData, repeat, "540");
+    TEST_RULE(SubstringPos, defined_as, "=/");
     TEST_RULE(SubstringPos, rulename, "defined-as");
     TEST_RULE(SubstringPos, comment, "; test comment\r\n");
     TEST_RULE(SubstringPos, c_nl, "; test comment\r\n");
     TEST_RULE(SubstringPos, c_wsp, "; test comment\r\n ");
-    TEST_RULE(SubstringPos, defined_as, "=/");
     TEST_RULE(SubstringPos, defined_as, " ; test comment \r\n =");
     TEST_RULE(SubstringPos, defined_as, " ; test comment \r\n =/ ; test comment \r\n ");
     TEST_RULE(RepeatData, repeat, "1*5");
+    TEST_RULE(RepeatData, repeat, "540");
+    TEST_RULE(AlternationData, alternation, "rule1 / rule2 / rule3");
+    TEST_RULE(ElementsData, elements, "*c-wsp");
+    TEST_RULE(ElementsData, elements, "*c-wsp \"/\"");
+    TEST_RULE(ElementsData, elements, "*c-wsp \"/\" *c-wsp concatenation");
+    TEST_RULE(ElementsData, elements, "*(*c-wsp \"/\" *c-wsp concatenation)");
+    TEST_RULE(ElementsData, elements, "concatenation\r\n *(*c-wsp \"/\" *c-wsp concatenation)");
 }
 
 void ParseABNF()

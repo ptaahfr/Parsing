@@ -481,7 +481,7 @@ public:
             return Base::Success();
         }
 
-        inline bool Maybe() const
+        inline void Maybe() const
         {
             return Base::Maybe();
         }
@@ -490,56 +490,14 @@ public:
         {
             return Base::Possible();
         }
+
+    protected:
+        inline RESULT_PTR Result()
+        {
+            return result_;
+        }
     };
     
-    template <typename RESULT_PTR>
-    class SavedIOState<true, RESULT_PTR> : public SavedIOState<false, RESULT_PTR>
-    {
-        using Base = SavedIOState<false, RESULT_PTR>;
-        std::remove_pointer_t<RESULT_PTR> bestAlternative_;
-        size_t bestLength_ = 0;
-        size_t bestOutputPos_ = 0;
-        size_t bestInputPos_ = 0;
-
-    public:
-        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, RESULT_PTR result)
-            : Base(input, output, result)
-        {
-        }
-
-        inline bool Maybe()
-        {
-            size_t length(this->input_.Pos() - this->inputPos_);
-            if (length > bestLength_)
-            {
-                bestLength_ = length;
-                bestOutputPos_ = this->output_.Pos();
-                bestInputPos_ = this->input_.Pos();
-                bestAlternative_ = *this->result_;
-                // resets to the initial state to parse another alternative
-                this->~SavedIOState();
-            }
-            return false;
-        }
-
-        inline bool Possible() const
-        {
-            return bestLength_ > 0;
-        }
-
-        inline bool Success()
-        {
-            size_t length(this->input_.Pos() - this->inputPos_);
-            if (length < bestLength_)
-            {
-                this->output_.SetPos(bestOutputPos_);
-                this->input_.SetPos(bestInputPos_);
-                *this->result_ = bestAlternative_;
-            }
-            return Base::Success();
-        }
-    };
-
     template <>
     class SavedIOState<false, nullptr_t>
     {
@@ -573,24 +531,88 @@ public:
             return true;
         }
 
-        inline bool Maybe() const
+        inline void Maybe() const
         {
-            return true;
         }
 
         inline bool Possible() const
         {
             return false;
         }
+
+    protected:
+        inline nullptr_t Result()
+        {
+            return nullptr;
+        }
     };
 
-    template <> 
-    class SavedIOState<true, nullptr_t> : public SavedIOState<false, nullptr_t>
+    template <typename RESULT_PTR> 
+    class SavedIOState<true, RESULT_PTR> : public SavedIOState<false, RESULT_PTR>
     {
-        using Base = SavedIOState<false, nullptr_t>;
+        using Base = SavedIOState<false, RESULT_PTR>;
+        size_t bestLength_ = 0;
+        size_t bestOutputPos_ = 0;
+        size_t bestInputPos_ = 0;
+
+        static inline nullptr_t SaveAlternative(nullptr_t, nullptr_t)
+        {
+            return nullptr;
+        }
+
+        template <typename RESULT>
+        static inline RESULT & SaveAlternative(RESULT * destination, RESULT * source)
+        {
+            return *destination = *source;
+        }
+
+        std::remove_reference_t<decltype(SaveAlternative(std::declval<RESULT_PTR>(), std::declval<RESULT_PTR>()))> bestAlternative_;
+        
+        template <typename RESULT>
+        static inline RESULT * PtrToBestAlternative(RESULT & r)
+        {
+            return &r;
+        }
+
+        static inline nullptr_t PtrToBestAlternative(nullptr_t)
+        {
+            return nullptr;
+        }
+
     public:
-        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, nullptr_t)
-            : Base(input, output, nullptr)
+        inline void Maybe()
+        {
+            size_t length(this->input_.Pos() - this->inputPos_);
+            if (length > bestLength_)
+            {
+                bestLength_ = length;
+                bestOutputPos_ = this->output_.Pos();
+                bestInputPos_ = this->input_.Pos();
+                SaveAlternative(PtrToBestAlternative(bestAlternative_), this->Result());
+                // resets to the initial state to parse another alternative
+                this->~SavedIOState();
+            }
+        }
+
+        inline bool Possible() const
+        {
+            return bestLength_ > 0;
+        }
+
+        inline bool Success()
+        {
+            size_t length(this->input_.Pos() - this->inputPos_);
+            if (length < bestLength_)
+            {
+                this->output_.SetPos(bestOutputPos_);
+                this->input_.SetPos(bestInputPos_);
+                SaveAlternative(this->Result(), PtrToBestAlternative(bestAlternative_));
+            }
+            return Base::Success();
+        }
+    public:
+        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, RESULT_PTR result)
+            : Base(input, output, result)
         {
         }
     };
@@ -672,10 +694,9 @@ namespace Impl
         auto const & nextElement(std::get<OFFSET + 1>(what.Primitives()));
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
+        ioState.Maybe();
 
-        if ((SEQ_TYPE::value != SeqTypeSeq::value) && result && ioState.Maybe())
-            return true;
-        else if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
+        if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
             return ParseItem<OFFSET + 2, IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 2>(what.Primitives()), what) || ioState.Possible();
         else
             return ioState.Possible();
@@ -691,9 +712,9 @@ namespace Impl
         enum { NEXT_IMPLICIT_INDEX = (INDEX == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX) };
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
-        if ((SEQ_TYPE::value != SeqTypeSeq::value) && result && ioState.Maybe())
-            return true;
-        else if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
+        ioState.Maybe();
+        
+        if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
             return ParseItem<OFFSET + 1, NEXT_IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 1>(what.Primitives()), what) || ioState.Possible();
         else
             return ioState.Possible();
