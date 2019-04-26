@@ -13,16 +13,36 @@
 
 #include "ParserRFC5322Data.hpp"
 #include "ParserRFC5322Rules.hpp"
-
-#ifdef TEST_ABNF
 #include "ParserRFC5234.hpp"
-#endif
 
 #include <iostream>
 
+#define TEST_RULE(type, name, str) \
+{ \
+    type nameResult; \
+    auto parser(Make_ParserFromString(std::string(str))); \
+    if (!Parse(parser, &nameResult, name()) || !parser.Ended()) \
+        std::cout << "Parsing rule " << #name << " failed" << std::endl; \
+    else \
+        std::cout << "Parsing rule " << #name << " succeed" << std::endl; \
+}
+
+void TestRFC5234()
+{
+    using namespace RFC5234ABNF;
+    TEST_RULE(RepeatData, repeat, "540");
+    TEST_RULE(SubstringPos, rulename, "defined-as");
+    TEST_RULE(SubstringPos, comment, "; test comment\r\n");
+    TEST_RULE(SubstringPos, c_nl, "; test comment\r\n");
+    TEST_RULE(SubstringPos, c_wsp, "; test comment\r\n ");
+    TEST_RULE(SubstringPos, defined_as, "=/");
+    TEST_RULE(SubstringPos, defined_as, " ; test comment \r\n =");
+    TEST_RULE(SubstringPos, defined_as, " ; test comment \r\n =/ ; test comment \r\n ");
+    TEST_RULE(RepeatData, repeat, "1*5");
+}
+
 void ParseABNF()
 {
-#ifdef TEST_ABNF
     std::string ABNFRulesABNF = R"ABNF(
          defined-as     =  *c-wsp ("=" / "=/") *c-wsp
                                 ; basic rules definition and
@@ -79,35 +99,13 @@ void ParseABNF()
 
     using namespace RFC5234ABNF;
 
-    auto parser(Make_Parser([&, pos = (size_t)0] () mutable
-    {
-        if (pos < ABNFRulesABNF.size())
-            return (int)ABNFRulesABNF[pos++];
-        return EOF;
-    }, (char)0));
+    auto parser(Make_ParserFromString(ABNFRulesABNF));
 
     RuleListData rules;
-    Parse(parser, &rules, rulelist());
-#endif
-}
-
-void test_grammar()
-{
-
-    using namespace RFC5234Core;
-
-    std::cout << decltype(IsConstant(CR()))() << std::endl;
-    std::cout << decltype(IsConstant(LF()))() << std::endl;
-    std::cout << decltype(IsConstant(DIGIT()))() << std::endl;
-    std::cout << decltype(IsConstant(Sequence(CR())))() << std::endl;
-    //std::cout << decltype(::IsConstant(Sequence(CR())))() << std::endl;
-    //std::cout << decltype(IsConstant(Sequence(CR(), LF())))() << std::endl;
-    std::cout << decltype(IsConstant(CRLF()))() << std::endl;
-    std::cout << decltype(IsConstant(Sequence(CR())))() << std::endl;
-    std::cout << decltype(IsConstant(Sequence(Repeat<10, 10>(CRLF()))))() << std::endl;
-    std::cout << decltype(IsConstant(Sequence(Repeat<1>(DIGIT()))))() << std::endl;
-
-    return;
+    if (Parse(parser, &rules))
+    {
+        std::cout << "Rules parsed !" << std::endl;
+    }
 }
 
 void TestRFC5322()
@@ -202,8 +200,7 @@ void test_address(std::string const & addr)
 int main()
 {
     TestRFC5322();
-
-    test_grammar();
+    TestRFC5234();
 
     ParseABNF();
 

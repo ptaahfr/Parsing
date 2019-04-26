@@ -152,19 +152,6 @@ namespace Impl
         return nullptr;
     }
 
-    template <typename TYPE>
-    inline void ClearNotNull(TYPE * t)
-    {
-        if (t != nullptr)
-        {
-            *t = {};
-        }
-    }
-
-    inline void ClearNotNull(nullptr_t = nullptr)
-    {
-    }
-
     template <typename ELEM>
     inline void PushBackIfNotNull(std::vector<ELEM> * elems, ELEM const & elem)
     {
@@ -277,14 +264,24 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
     inline bool Parse(PARSER & parser, TYPE result, name) { return Parse(parser, result, __VA_ARGS__); } \
     auto IsConstant(name) -> decltype(IsConstant(__VA_ARGS__));
 
+#define PARSER_RULE_PARTIAL_CDATA(name, data, ...) \
+    PARSER_RULE_PARTIAL(name, __VA_ARGS__) \
+    template <typename PARSER> \
+    bool Parse(PARSER & parser, data * result) { return Parse(parser, result, __VA_ARGS__); }
+
 #define PARSER_RULE(name, ...) \
     class name {}; \
     PARSER_RULE_PARTIAL(name, __VA_ARGS__)
 
+#define PARSER_RULE_CDATA(name, data, ...) \
+    PARSER_RULE_FORWARD(name) \
+    PARSER_RULE_PARTIAL_CDATA(name, data, __VA_ARGS__)
+
 #define PARSER_RULE_DATA(name, ...) \
-    PARSER_RULE(name, __VA_ARGS__) \
-    template <typename PARSER> \
-    bool Parse(PARSER & parser, name##Data * result) { return Parse(parser, result, __VA_ARGS__); }
+    PARSER_RULE_CDATA(name, name##Data, __VA_ARGS__)
+
+template <size_t IDX>
+class Idx {};
 
 using SeqTypeSeq = std::integral_constant<size_t, 0>;
 using SeqTypeAlt = std::integral_constant<size_t, 1>;
@@ -304,7 +301,6 @@ public:
     inline std::tuple<PRIMITIVES...> & Primitives() { return primitives_; }
 
 };
-
 
 // Sequence try to parse consecutive primitives in the current object's consecutive members or in the current object if there is only one variable primitive
 template <typename... PRIMITIVES>
@@ -402,9 +398,6 @@ inline auto CountVariable(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...>
 -> std::integral_constant<size_t, ((std::remove_reference_t<decltype(IsConstant(std::declval<PRIMITIVE>()))>::value ? 0 : 1)
                                   + std::remove_reference_t<decltype(CountVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>::value)>;
 
-template <size_t IDX>
-class Idx {};
-
 template <typename INPUT, typename CHAR_TYPE>
 class ParserIO
 {
@@ -423,14 +416,41 @@ public:
     inline Impl::OutputAdapter<CHAR_TYPE> & Output() { return output_; }
 
 public:
-    template <typename RESULT_PTR>
-    class SavedIOState
+    template <bool ALT, typename RESULT_PTR>
+    class SavedIOState : public SavedIOState<ALT, nullptr_t>
     {
-        Impl::InputAdapter<INPUT> & input_;
-        Impl::OutputAdapter<CHAR_TYPE> & output_;
-        size_t inputPos_;
-        size_t outputPos_;
+        using Base = SavedIOState<ALT, nullptr_t>;
+        using ResultType = std::remove_pointer_t<RESULT_PTR>;
+    protected:
         RESULT_PTR result_;
+
+    private:
+        template <typename ELEM_TYPE>
+        static inline size_t GetPreviousState(std::vector<ELEM_TYPE> * result)
+        {
+            return result->size();
+        }
+
+        template <typename RESULT2_PTR>
+        static inline nullptr_t GetPreviousState(RESULT2_PTR result)
+        {
+            return nullptr;
+        }
+
+
+        template <typename ELEM_TYPE>
+        static inline void SetPreviousState(std::vector<ELEM_TYPE> * result, size_t previousState)
+        {
+            result->resize(previousState);
+        }
+
+        template <typename RESULT>
+        static inline void SetPreviousState(RESULT * result, nullptr_t)
+        {
+            *result = {};
+        }
+
+        decltype(GetPreviousState(result_)) previousState_;
 
         template <typename RESULT2_PTR>
         static inline void SetResult(RESULT2_PTR result, SubstringPos newResult)
@@ -443,7 +463,94 @@ public:
         }
     public:
         inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, RESULT_PTR result)
-            : input_(input), output_(output), inputPos_(input.Pos()), outputPos_(output.Pos()), result_(result)
+            : Base(input, output, nullptr), previousState_(GetPreviousState(result)), result_(result)
+        {
+        }
+
+        inline ~SavedIOState()
+        {
+            if (this->outputPos_ != -1)
+            {
+                SetPreviousState(result_, previousState_);
+            }
+        }
+
+        inline bool Success()
+        {
+            SetResult(result_, SubstringPos(this->outputPos_, this->output_.Pos()));
+            return Base::Success();
+        }
+
+        inline bool Maybe() const
+        {
+            return Base::Maybe();
+        }
+
+        inline bool Possible() const
+        {
+            return Base::Possible();
+        }
+    };
+    
+    template <typename RESULT_PTR>
+    class SavedIOState<true, RESULT_PTR> : public SavedIOState<false, RESULT_PTR>
+    {
+        using Base = SavedIOState<false, RESULT_PTR>;
+        std::remove_pointer_t<RESULT_PTR> bestAlternative_;
+        size_t bestLength_ = 0;
+        size_t bestOutputPos_ = 0;
+        size_t bestInputPos_ = 0;
+
+    public:
+        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, RESULT_PTR result)
+            : Base(input, output, result)
+        {
+        }
+
+        inline bool Maybe()
+        {
+            size_t length(this->input_.Pos() - this->inputPos_);
+            if (length > bestLength_)
+            {
+                bestLength_ = length;
+                bestOutputPos_ = this->output_.Pos();
+                bestInputPos_ = this->input_.Pos();
+                bestAlternative_ = *this->result_;
+                // resets to the initial state to parse another alternative
+                this->~SavedIOState();
+            }
+            return false;
+        }
+
+        inline bool Possible() const
+        {
+            return bestLength_ > 0;
+        }
+
+        inline bool Success()
+        {
+            size_t length(this->input_.Pos() - this->inputPos_);
+            if (length < bestLength_)
+            {
+                this->output_.SetPos(bestOutputPos_);
+                this->input_.SetPos(bestInputPos_);
+                *this->result_ = bestAlternative_;
+            }
+            return Base::Success();
+        }
+    };
+
+    template <>
+    class SavedIOState<false, nullptr_t>
+    {
+    protected:
+        Impl::InputAdapter<INPUT> & input_;
+        Impl::OutputAdapter<CHAR_TYPE> & output_;
+        size_t inputPos_;
+        size_t outputPos_;
+    public:
+        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, nullptr_t)
+            : input_(input), output_(output), inputPos_(input.Pos()), outputPos_(output.Pos())
         {
         }
 
@@ -461,17 +568,37 @@ public:
 
         inline bool Success()
         {
-            SetResult(result_, SubstringPos(outputPos_, output_.Pos()));
             inputPos_ = (size_t)-1;
             outputPos_ = (size_t)-1;
             return true;
         }
+
+        inline bool Maybe() const
+        {
+            return true;
+        }
+
+        inline bool Possible() const
+        {
+            return false;
+        }
     };
 
-    template <typename RESULT_PTR>
-    inline SavedIOState<RESULT_PTR> Save(RESULT_PTR result)
+    template <> 
+    class SavedIOState<true, nullptr_t> : public SavedIOState<false, nullptr_t>
     {
-        return SavedIOState<RESULT_PTR>(input_, output_, result);
+        using Base = SavedIOState<false, nullptr_t>;
+    public:
+        inline SavedIOState(Impl::InputAdapter<INPUT> & input, Impl::OutputAdapter<CHAR_TYPE> & output, nullptr_t)
+            : Base(input, output, nullptr)
+        {
+        }
+    };
+
+    template <bool ALT, typename RESULT_PTR>
+    inline SavedIOState<ALT, RESULT_PTR> Save(RESULT_PTR & result)
+    {
+        return SavedIOState<ALT, RESULT_PTR>(input_, output_, result);
     }
 };
 
@@ -521,8 +648,8 @@ inline bool Parse(PARSER & parser, nullptr_t, CharRange<CH1, CH2> const & what, 
 
 namespace Impl
 {
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 1), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 1), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
         enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE :
             (((SEQ_TYPE::value == SeqTypeAlt::value )
@@ -530,31 +657,32 @@ namespace Impl
         return Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 2), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 2), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
         return Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET + 1>(what.Primitives()));
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what);
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what);
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 2), void *> = nullptr>
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 2), void *> = nullptr>
+    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
         auto const & nextElement(std::get<OFFSET + 1>(what.Primitives()));
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
-        if ((SEQ_TYPE::value != SeqTypeSeq::value) && result)
+
+        if ((SEQ_TYPE::value != SeqTypeSeq::value) && result && ioState.Maybe())
             return true;
         else if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
-            return ParseItem<OFFSET + 2, IMPLICIT_INDEX>(parser, dest, std::get<OFFSET + 2>(what.Primitives()), what);
+            return ParseItem<OFFSET + 2, IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 2>(what.Primitives()), what) || ioState.Possible();
         else
-            return false;
+            return ioState.Possible();
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> >
-    inline bool ParseItem(PARSER & parser, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> >
+    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
         enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE :
             (((SEQ_TYPE::value == SeqTypeAlt::value )
@@ -563,24 +691,23 @@ namespace Impl
         enum { NEXT_IMPLICIT_INDEX = (INDEX == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX) };
 
         bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
-        if ((SEQ_TYPE::value != SeqTypeSeq::value) && result)
+        if ((SEQ_TYPE::value != SeqTypeSeq::value) && result && ioState.Maybe())
             return true;
         else if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
-            return ParseItem<OFFSET + 1, NEXT_IMPLICIT_INDEX>(parser, dest, std::get<OFFSET + 1>(what.Primitives()), what);
+            return ParseItem<OFFSET + 1, NEXT_IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 1>(what.Primitives()), what) || ioState.Possible();
         else
-            return false;
+            return ioState.Possible();
     }
 }
 
-template <typename PARSER, typename DEST_PTR, typename IS_ALT, typename... PRIMITIVES>
-inline bool Parse(PARSER & parser, DEST_PTR dest, SequenceType<IS_ALT, PRIMITIVES...> const & what)
+template <typename PARSER, typename DEST_PTR, typename SEQ_TYPE, typename... PRIMITIVES>
+inline bool Parse(PARSER & parser, DEST_PTR dest, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
 {
-    auto ioState(parser.Save(dest));
-    if (Impl::ParseItem<0, 0>(parser, dest, std::get<0>(what.Primitives()), what))
+    auto ioState(parser.Save<SEQ_TYPE::value != SeqTypeSeq::value>(dest));
+    if (Impl::ParseItem<0, 0>(parser, ioState, dest, std::get<0>(what.Primitives()), what))
     {
         return ioState.Success();
     }
-    Impl::ClearNotNull(dest);
     return false;
 }
 
@@ -588,9 +715,8 @@ template <typename PARSER, typename ELEMS_PTR, size_t MIN_COUNT, size_t MAX_COUN
 inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & what)
 {
     size_t count = 0;
-    size_t prevSize = Impl::GetSizeIfNotNull(elems);
 
-    auto ioState(parser.Save(elems));
+    auto ioState(parser.Save<false>(elems));
 
     for (; count < MAX_COUNT; ++count)
     {
@@ -607,7 +733,6 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_CO
 
     if (count < MIN_COUNT)
     {
-        Impl::ResizeIfNotNull(elems, prevSize);
         return false;
     }
 

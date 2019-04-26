@@ -17,7 +17,7 @@ namespace RFC5234Core
     // BIT            =  "0" / "1"
     PARSER_RULE(BIT, CharVal<'0', '1'>());
     // CHAR           =  %x01-7F
-    PARSER_RULE(CHAR, CharRange<1, 0x7F>());
+    PARSER_RULE(CHAR, CharRange<0x01, 0x7F>());
     // LF             =  %x0A
     PARSER_RULE(LF, CharVal<0x0A>());
     // CR             =  %x0D
