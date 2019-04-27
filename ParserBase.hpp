@@ -233,11 +233,15 @@ namespace Impl
 template <MaxCharType... CODES>
 class CharVal
 {
+public:
+    static char const * Name() { return "CharVal"; }
 };
 
 template <MaxCharType CH1, MaxCharType CH2>
 class CharRange
 {
+public:
+    static char const * Name() { return "CharRange"; }
 };
 
 template <MaxCharType CH>
@@ -260,21 +264,26 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
 
 
 #define PARSER_RULE_FORWARD(name) \
-    class name {};
+    class name { public: \
+        static char const * Name() { return #name; } \
+    };
 
 #define PARSER_RULE_PARTIAL(name, ...) \
     template <typename PARSER, typename TYPE> \
-    inline bool Parse(PARSER & parser, TYPE result, name) { return Parse(parser, result, __VA_ARGS__); } \
+    inline bool Parse(PARSER & parser, TYPE result, char const *, name) { return Parse(parser, result, #name, __VA_ARGS__); } \
+    template <typename PARSER, typename TYPE> \
+    inline bool Parse(PARSER & parser, TYPE result, name) { return Parse(parser, result, #name, __VA_ARGS__); } \
     template <typename PARSER, typename TYPE> \
     inline bool ParseExact(PARSER & parser, TYPE result, name) \
     { \
-        if (Parse(parser, result, __VA_ARGS__)) \
+        if (Parse(parser, result, #name, __VA_ARGS__)) \
         { \
             if (parser.Ended()) \
             { \
                 return true;\
             } \
-            parser.Errors() = parser.LastRepeatErrors(); \
+            parser.Errors().clear(); \
+            std::swap(parser.Errors(), parser.LastRepeatErrors()); \
         } \
         return false; \
     } \
@@ -288,7 +297,7 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
     bool ParseExact(PARSER & parser, data * result) { return ParseExact(parser, result, name()); }
 
 #define PARSER_RULE(name, ...) \
-    class name {}; \
+    PARSER_RULE_FORWARD(name) \
     PARSER_RULE_PARTIAL(name, __VA_ARGS__)
 
 #define PARSER_RULE_CDATA(name, data, ...) \
@@ -314,6 +323,8 @@ public:
         : primitives_(primitives...)
     {
     }
+
+    static char const * Name() { return SEQ_TYPE::value == 0 ? "Sequence" : (SEQ_TYPE::value == 1 ? "Alternation" : "Union") ; }
 
     inline std::tuple<PRIMITIVES...> const & Primitives() const { return primitives_; }
     inline std::tuple<PRIMITIVES...> & Primitives() { return primitives_; }
@@ -350,6 +361,8 @@ public:
         : primitive_(primitive)
     {
     }
+    
+    static char const * Name() { return "Repeatition"; }
 
     inline PRIMITIVE const & Primitive() const { return primitive_; }
     inline PRIMITIVE & Primitive() { return primitive_; }
@@ -486,8 +499,8 @@ public:
             *result = newResult;
         }
     public:
-        inline SavedIOState(ParserIO & parent, RESULT_PTR result)
-            : Base(parent, nullptr), previousState_(GetPreviousState(result)), result_(result)
+        inline SavedIOState(ParserIO & parent, RESULT_PTR result, char const * ruleName)
+            : Base(parent, nullptr, ruleName), previousState_(GetPreviousState(result)), result_(result)
         {
         }
 
@@ -530,9 +543,11 @@ public:
         size_t inputPos_;
         size_t outputPos_;
         size_t errorsSize_;
+        char const * ruleName_;
     public:
-        inline SavedIOState(ParserIO & parent, nullptr_t)
-            : parent_(parent), inputPos_(parent.Input().Pos()), outputPos_(parent.Output().Pos()), errorsSize_(parent.Errors().size())
+        inline SavedIOState(ParserIO & parent, nullptr_t, char const * ruleName)
+            : parent_(parent), inputPos_(parent.Input().Pos()), outputPos_(parent.Output().Pos()),
+            errorsSize_(parent.Errors().size()), ruleName_(ruleName)
         {
         }
 
@@ -543,13 +558,13 @@ public:
                 std::list<ErrorFunctionType> childErrors;
                 std::swap(parent_.Errors(), childErrors);
                 parent_.Errors().push_back(
-                    [errors = std::move(childErrors), firstInputPos = inputPos_, lastInputPos = parent_.Input().Pos()]
+                    [ruleName = ruleName_, errors = std::move(childErrors), firstInputPos = inputPos_, lastInputPos = parent_.Input().Pos()]
                     (std::ostream & cerr, std::string const & indent)
                 {
                     cerr << indent << "#" << firstInputPos;
                     if (firstInputPos < lastInputPos)
                         cerr << "-" << lastInputPos;
-                    cerr << ": Error parsing rule:" << std::endl;
+                    cerr << ": Error parsing rule [" << ruleName << "]" << std::endl;
                     for (auto const & error : errors)
                     {
                         error(cerr, indent + "  ");
@@ -651,16 +666,16 @@ public:
             return Base::Success();
         }
     public:
-        inline SavedIOState(ParserIO & parent, RESULT_PTR result)
-            : Base(parent, result)
+        inline SavedIOState(ParserIO & parent, RESULT_PTR result, char const * ruleName)
+            : Base(parent, result, ruleName)
         {
         }
     };
 
     template <bool ALT, typename RESULT_PTR>
-    inline SavedIOState<ALT, RESULT_PTR> Save(RESULT_PTR & result)
+    inline SavedIOState<ALT, RESULT_PTR> Save(RESULT_PTR & result, char const * ruleName)
     {
-        return SavedIOState<ALT, RESULT_PTR>(*this, result);
+        return SavedIOState<ALT, RESULT_PTR>(*this, result, ruleName);
     }
 };
 
@@ -717,9 +732,13 @@ inline bool IsEmpty(std::vector<ELEM> const & arr)
     return true;
 }
 
+#include <cctype>
+
 template <MaxCharType CODE, typename OSTREAM>
 inline void CodesToString(OSTREAM & os)
 {
+    if (std::isprint(CODE))
+        os << "\'" << (char)CODE << "\' ";
     os << "0x" << std::setfill('0') << std::setw(2) << CODE << std::hex;
 }
 
@@ -732,7 +751,7 @@ inline void CodesToString(OSTREAM & os)
 }
 
 template <typename PARSER, MaxCharType... CODES>
-inline bool Parse(PARSER & parser, nullptr_t, CharVal<CODES...> const & what, bool escape = false)
+inline bool Parse(PARSER & parser, nullptr_t, char const * ruleName, CharVal<CODES...> const & what, bool escape = false)
 {
     auto ch(parser.Input()());
     if (Match(ch, what))
@@ -751,7 +770,7 @@ inline bool Parse(PARSER & parser, nullptr_t, CharVal<CODES...> const & what, bo
 }
 
 template <typename PARSER, MaxCharType CH1, MaxCharType CH2>
-inline bool Parse(PARSER & parser, nullptr_t, CharRange<CH1, CH2> const & what, bool escape = false)
+inline bool Parse(PARSER & parser, nullptr_t, char const * ruleName, CharRange<CH1, CH2> const & what, bool escape = false)
 {
     auto ch(parser.Input()());
     if (Match(ch, what))
@@ -779,13 +798,13 @@ namespace Impl
         enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE :
             (((SEQ_TYPE::value == SeqTypeAlt::value )
                 || (std::remove_reference_t<decltype(CountVariables(what))>::value <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
-        return Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
+        return Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement.Name(), nextElement);
     }
 
     template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET == sizeof...(PRIMITIVES) - 2), void *> = nullptr>
     inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
     {
-        return Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET + 1>(what.Primitives()));
+        return Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET + 1>(what.Primitives()).Name(), std::get<OFFSET + 1>(what.Primitives()));
     }
 
     template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, std::enable_if_t<(OFFSET < sizeof...(PRIMITIVES) - 1), void *> = nullptr>
@@ -796,7 +815,7 @@ namespace Impl
     {
         auto const & nextElement(std::get<OFFSET + 1>(what.Primitives()));
 
-        bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
+        bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement.Name(), nextElement);
         if (result)
             ioState.SetPossibleMatch();
 
@@ -815,7 +834,7 @@ namespace Impl
 
         enum { NEXT_IMPLICIT_INDEX = (INDEX == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX) };
 
-        bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
+        bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement.Name(), nextElement);
         if (result)
             ioState.SetPossibleMatch();
 
@@ -827,9 +846,9 @@ namespace Impl
 }
 
 template <typename PARSER, typename DEST_PTR, typename SEQ_TYPE, typename... PRIMITIVES>
-inline bool Parse(PARSER & parser, DEST_PTR dest, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+inline bool Parse(PARSER & parser, DEST_PTR dest, char const * ruleName, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
 {
-    auto ioState(parser.Save<SEQ_TYPE::value != SeqTypeSeq::value>(dest));
+    auto ioState(parser.Save<SEQ_TYPE::value != SeqTypeSeq::value>(dest, ruleName));
     if (Impl::ParseItem<0, 0>(parser, ioState, dest, std::get<0>(what.Primitives()), what))
     {
         return ioState.Success();
@@ -848,16 +867,16 @@ inline bool IsEmpty(nullptr_t)
 }
 
 template <typename PARSER, typename ELEMS_PTR, size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
-inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & what)
+inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & what)
 {
     size_t count = 0;
 
-    auto ioState(parser.Save<false>(elems));
+    auto ioState(parser.Save<false>(elems, ruleName));
 
     for (; count < MAX_COUNT; ++count)
     {
         decltype(Impl::ElemTypeOrNull(elems)) elem = {};
-        if (Parse(parser, Impl::PtrOrNull(elem), what.Primitive()))
+        if (Parse(parser, Impl::PtrOrNull(elem), what.Primitive().Name(), what.Primitive()))
         {
             if (false == IsEmpty(elem))
                 Impl::PushBackIfNotNull(elems, elem);
@@ -870,16 +889,17 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_CO
 
     if (count >= MIN_COUNT)
     {
-        parser.LastRepeatErrors() = parser.Errors();
+        parser.LastRepeatErrors().clear();
+        std::swap(parser.LastRepeatErrors(), parser.Errors());
         return ioState.Success();
     }
     return false;
 }
 
 template <typename PARSER, typename ELEMS_PTR, typename PRIMITIVE>
-inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<0, 1, PRIMITIVE> const & what)
+inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, RepeatType<0, 1, PRIMITIVE> const & what)
 {
-    return Parse(parser, elems, what.Primitive()) || true;
+    return Parse(parser, elems, what.Primitive().Name(), what.Primitive()) || true;
 }
 
 template <typename CHAR_TYPE>

@@ -57,7 +57,7 @@ void TestRFC5234()
 
 void ParseABNF()
 {
-    std::string ABNFRulesABNF = R"ABNF(
+    std::string str = R"ABNF(
 defined-as     =  *c-wsp ("=" / "=/") *c-wsp
                     ; basic rules definition and
                     ;  incremental alternatives
@@ -114,7 +114,7 @@ prose-val      =  "<" *(%x20-3D / %x3F-7E) ">"
 
     std::cout << "Parsing ABNF rules... ";
 
-    auto parser(Make_ParserFromString(ABNFRulesABNF));
+    auto parser(Make_ParserFromString(str));
     RuleListData rules;
     if (ParseExact(parser, &rules))
     {
