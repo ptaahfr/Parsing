@@ -118,7 +118,7 @@ namespace RFC5234ABNF
 
     using ConcatenationData = std::vector<RepetitionData>;
     // concatenation  =  repetition *(1*c-wsp repetition)
-    PARSER_RULE_CDATA(concatenation, ConcatenationData, HeadTail(repetition(), Idx<INDEX_NONE>(), c_wsp(), Idx<INDEX_THIS>(), repetition()));
+    PARSER_RULE_CDATA(concatenation, ConcatenationData, HeadTail(repetition(), Idx<INDEX_NONE>(), Repeat<1>(c_wsp()), Idx<INDEX_THIS>(), repetition()));
 
     class AlternationData : public std::vector<ConcatenationData>
     {
