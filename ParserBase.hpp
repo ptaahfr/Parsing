@@ -12,6 +12,9 @@
 #include <type_traits>
 #include <string>
 #include <algorithm>
+#include <functional>
+#include <iomanip>
+#include <list>
 
 #define INDEX_NONE INT_MAX          // Used to define a primitive that has no specific member
 #define INDEX_THIS (INT_MAX-1)      // Use to define a primitive that parse current object instead of a member
@@ -262,12 +265,27 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
 #define PARSER_RULE_PARTIAL(name, ...) \
     template <typename PARSER, typename TYPE> \
     inline bool Parse(PARSER & parser, TYPE result, name) { return Parse(parser, result, __VA_ARGS__); } \
+    template <typename PARSER, typename TYPE> \
+    inline bool ParseExact(PARSER & parser, TYPE result, name) \
+    { \
+        if (Parse(parser, result, __VA_ARGS__)) \
+        { \
+            if (parser.Ended()) \
+            { \
+                return true;\
+            } \
+            parser.Errors() = parser.LastRepeatErrors(); \
+        } \
+        return false; \
+    } \
     auto IsConstant(name) -> decltype(IsConstant(__VA_ARGS__));
 
 #define PARSER_RULE_PARTIAL_CDATA(name, data, ...) \
     PARSER_RULE_PARTIAL(name, __VA_ARGS__) \
     template <typename PARSER> \
-    bool Parse(PARSER & parser, data * result) { return Parse(parser, result, __VA_ARGS__); }
+    bool Parse(PARSER & parser, data * result) { return Parse(parser, result, name()); } \
+    template <typename PARSER> \
+    bool ParseExact(PARSER & parser, data * result) { return ParseExact(parser, result, name()); }
 
 #define PARSER_RULE(name, ...) \
     class name {}; \
@@ -390,20 +408,23 @@ template <size_t FIXED_COUNT, typename PRIMITIVE>
 inline auto IsConstant(RepeatType<FIXED_COUNT, FIXED_COUNT, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
 
 template <typename SEQ_TYPE, typename PRIMITIVE>
-inline auto CountVariable(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence)
+inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence)
 -> std::integral_constant<size_t, (std::remove_reference_t<decltype(IsConstant(std::declval<PRIMITIVE>()))>::value ? 0 : 1)>;
 
 template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, std::enable_if_t<(sizeof...(OTHER_PRIMITIVES) > 0), void *> = nullptr>
-inline auto CountVariable(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
 -> std::integral_constant<size_t, ((std::remove_reference_t<decltype(IsConstant(std::declval<PRIMITIVE>()))>::value ? 0 : 1)
-                                  + std::remove_reference_t<decltype(CountVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>::value)>;
+                                  + std::remove_reference_t<decltype(CountVariables(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>::value)>;
 
 template <typename INPUT, typename CHAR_TYPE>
 class ParserIO
 {
+    using ErrorFunctionType = std::function<void(std::ostream &, std::string const &)>;
+
     Impl::InputAdapter<INPUT> input_;
     Impl::OutputAdapter<CHAR_TYPE> output_;
-    std::vector<std::pair<size_t, size_t> > errors_;
+    std::list<ErrorFunctionType> errors_;
+    std::list<ErrorFunctionType> lastRepeatErrors_;
 public:
     inline ParserIO(INPUT input)
         : input_(input)
@@ -414,8 +435,9 @@ public:
     inline bool Ended() { return input_() == EOF; }
     inline Impl::InputAdapter<INPUT> & Input() { return input_; }
     inline Impl::OutputAdapter<CHAR_TYPE> & Output() { return output_; }
-    inline std::vector<std::pair<size_t, size_t> > const & Errors() const { return errors_; }
-    inline std::vector<std::pair<size_t, size_t> > & Errors() { return errors_; }
+    inline auto const & Errors() const { return errors_; }
+    inline auto & Errors() { return errors_; }
+    inline auto & LastRepeatErrors() { return lastRepeatErrors_; }
 
 public:
     template <bool ALT, typename RESULT_PTR>
@@ -518,7 +540,21 @@ public:
         {
             if (inputPos_ != (size_t)-1 && outputPos_ != (size_t)-1)
             {
-                parent_.Errors().push_back(std::make_pair(inputPos_, parent_.Input().Pos()));
+                std::list<ErrorFunctionType> childErrors;
+                std::swap(parent_.Errors(), childErrors);
+                parent_.Errors().push_back(
+                    [errors = std::move(childErrors), firstInputPos = inputPos_, lastInputPos = parent_.Input().Pos()]
+                    (std::ostream & cerr, std::string const & indent)
+                {
+                    cerr << indent << "#" << firstInputPos;
+                    if (firstInputPos < lastInputPos)
+                        cerr << "-" << lastInputPos;
+                    cerr << ": Error parsing rule:" << std::endl;
+                    for (auto const & error : errors)
+                    {
+                        error(cerr, indent + "  ");
+                    }
+                });
                 parent_.Input().SetPos(inputPos_);
                 parent_.Output().SetPos(outputPos_);
             }
@@ -647,6 +683,54 @@ inline auto Make_ParserFromString(std::basic_string<CHAR_TYPE> const & str)
     }, (CHAR_TYPE)0);
 }
 
+template <typename ELEM>
+inline bool IsEmpty(std::vector<ELEM> const & arr);
+
+template <size_t OFFSET, typename... ARGS>
+inline bool IsEmpty(std::tuple<ARGS...> const & tuple);
+
+template <typename... ARGS>
+inline bool IsEmpty(std::tuple<ARGS...> const & tuple)
+{
+    return IsEmpty<0>(tuple);
+}
+
+template <size_t OFFSET, typename... ARGS>
+inline bool IsEmpty(std::tuple<ARGS...> const & tuple)
+{
+    enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(ARGS) - 1) };
+    if (false == IsEmpty(std::get<OFFSET>(tuple)))
+        return false;
+    if (NEXT_OFFSET > OFFSET)
+        return IsEmpty<NEXT_OFFSET>(tuple);
+    return true;
+}
+
+template <typename ELEM>
+inline bool IsEmpty(std::vector<ELEM> const & arr)
+{
+    for (auto const & elem : arr)
+    {
+        if (false == IsEmpty(elem))
+            return false;
+    }
+    return true;
+}
+
+template <MaxCharType CODE, typename OSTREAM>
+inline void CodesToString(OSTREAM & os)
+{
+    os << "0x" << std::setfill('0') << std::setw(2) << CODE << std::hex;
+}
+
+template <MaxCharType CODE, MaxCharType... OTHER_CODES, typename OSTREAM, std::enable_if_t<(sizeof...(OTHER_CODES) > 0), void *> = nullptr>
+inline void CodesToString(OSTREAM & os)
+{
+    CodesToString<CODE>(os);
+    os << " or ";
+    CodesToString<OTHER_CODES...>(os);
+}
+
 template <typename PARSER, MaxCharType... CODES>
 inline bool Parse(PARSER & parser, nullptr_t, CharVal<CODES...> const & what, bool escape = false)
 {
@@ -657,9 +741,14 @@ inline bool Parse(PARSER & parser, nullptr_t, CharVal<CODES...> const & what, bo
         return true;
     }
     parser.Input().Back();
+    parser.Errors().push_back([inputPos = parser.Input().Pos()](std::ostream & cerr, std::string const & indent)
+    {
+        cerr << indent << "#" << inputPos << ": Expected ";
+        CodesToString<CODES...>(cerr);
+        cerr << std::endl;
+    });
     return false;
 }
-
 
 template <typename PARSER, MaxCharType CH1, MaxCharType CH2>
 inline bool Parse(PARSER & parser, nullptr_t, CharRange<CH1, CH2> const & what, bool escape = false)
@@ -671,6 +760,14 @@ inline bool Parse(PARSER & parser, nullptr_t, CharRange<CH1, CH2> const & what, 
         return true;
     }
     parser.Input().Back();
+    parser.Errors().push_back([inputPos = parser.Input().Pos()](std::ostream & cerr, std::string const & indent)
+    {
+        cerr << indent << "#" << inputPos << ": Expected range ";
+        CodesToString<CH1>(cerr);
+        cerr << "-";
+        CodesToString<CH2>(cerr);
+        cerr << std::endl;
+    });
     return false;
 }
 
@@ -681,7 +778,7 @@ namespace Impl
     {
         enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE :
             (((SEQ_TYPE::value == SeqTypeAlt::value )
-                || (std::remove_reference_t<decltype(CountVariable(what))>::value <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
+                || (std::remove_reference_t<decltype(CountVariables(what))>::value <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
         return Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement);
     }
 
@@ -714,7 +811,7 @@ namespace Impl
     {
         enum { INDEX = std::remove_reference_t<decltype(IsConstant(nextElement))>::value ? INDEX_NONE :
             (((SEQ_TYPE::value == SeqTypeAlt::value )
-                || (std::remove_reference_t<decltype(CountVariable(what))>::value <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
+                || (std::remove_reference_t<decltype(CountVariables(what))>::value <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
 
         enum { NEXT_IMPLICIT_INDEX = (INDEX == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX) };
 
@@ -750,40 +847,6 @@ inline bool IsEmpty(nullptr_t)
     return true;
 }
 
-template <typename ELEM>
-inline bool IsEmpty(std::vector<ELEM> const & arr);
-
-template <size_t OFFSET, typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> const & tuple);
-
-template <typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> const & tuple)
-{
-    return IsEmpty<0>(tuple);
-}
-
-template <size_t OFFSET, typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> const & tuple)
-{
-    enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(ARGS) - 1) };
-    if (false == IsEmpty(std::get<OFFSET>(tuple)))
-        return false;
-    if (NEXT_OFFSET > OFFSET)
-        return IsEmpty<NEXT_OFFSET>(tuple);
-    return true;
-}
-
-template <typename ELEM>
-inline bool IsEmpty(std::vector<ELEM> const & arr)
-{
-    for (auto const & elem : arr)
-    {
-        if (false == IsEmpty(elem))
-            return false;
-    }
-    return true;
-}
-
 template <typename PARSER, typename ELEMS_PTR, size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
 inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & what)
 {
@@ -807,6 +870,7 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, RepeatType<MIN_COUNT, MAX_CO
 
     if (count >= MIN_COUNT)
     {
+        parser.LastRepeatErrors() = parser.Errors();
         return ioState.Success();
     }
     return false;
@@ -825,4 +889,3 @@ inline std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buff
     subString.second = std::max(subString.first, std::min(subString.second, buffer.size()));
     return std::basic_string<CHAR_TYPE>(buffer.data() + subString.first, buffer.data() + subString.second);
 }
-

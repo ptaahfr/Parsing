@@ -24,7 +24,7 @@
     type nameResult; \
     auto parser(Make_ParserFromString(std::string(str))); \
     std::cout << "Parsing rule " << #name; \
-    if (!Parse(parser, &nameResult, name()) || !parser.Ended()) \
+    if (!ParseExact(parser, &nameResult, name())) \
         std::cout<< " failed" << std::endl; \
     else \
         std::cout << " succeed" << std::endl; \
@@ -112,17 +112,22 @@ prose-val      =  "<" *(%x20-3D / %x3F-7E) ">"
 )ABNF";
     using namespace RFC5234ABNF;
 
-    auto parser(Make_ParserFromString(ABNFRulesABNF));
+    std::cout << "Parsing ABNF rules... ";
 
+    auto parser(Make_ParserFromString(ABNFRulesABNF));
     RuleListData rules;
-    if (Parse(parser, &rules))
+    if (ParseExact(parser, &rules))
     {
-        std::cout << "Rules parsed !" << std::endl;
+        std::cout << "Success" << std::endl;
+    }
+    else
+    {
+        std::cout << "Failure" << std::endl;
     }
 
     for (auto const & parseError : parser.Errors())
     {
-        std::cerr << "Parsing error at " << std::get<0>(parseError) << ":" << std::get<1>(parseError) << std::endl;
+        parseError(std::cerr, "");
     }
 
     return;
@@ -162,7 +167,7 @@ void test_address(std::string const & addr)
     using namespace RFC5322;
 
     AddressListData addresses;
-    if (Parse(parser, &addresses) && parser.Ended())
+    if (ParseExact(parser, &addresses))
     {
         auto const & outBuffer = parser.OutputBuffer();
         std::cout << " is OK\n";
