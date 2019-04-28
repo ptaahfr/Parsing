@@ -69,17 +69,17 @@ namespace RFC5234ABNF
     // bin-val        =  "b" 1*BIT
     //                   [ 1*("." 1*BIT) / ("-" 1*BIT) ]
     PARSER_RULE(bin_val, Sequence(CharVal<'b'>(), Idx<NumValSpecFields_FirstValue>(), Repeat<1>(BIT()),
-        Optional(Union(Idx<NumValSpecFields_SequenceValues>(), Repeat<1>(CharVal<'.'>(), Repeat<1>(BIT())), Sequence(CharVal<'-'>(), Idx<NumValSpecFields_RangeLastValue>(), Repeat<1>(BIT()))))));
+        Idx<INDEX_THIS>(), Optional(Union(Idx<NumValSpecFields_SequenceValues>(), Repeat<1>(CharVal<'.'>(), Repeat<1>(BIT())), Idx<NumValSpecFields_RangeLastValue>(), Sequence(CharVal<'-'>(), Repeat<1>(BIT()))))));
 
     // dec-val        =  "d" 1*DIGIT
     //                   [ 1*("." 1*DIGIT) / ("-" 1*DIGIT) ]
     PARSER_RULE(dec_val, Sequence(CharVal<'d'>(), Idx<NumValSpecFields_FirstValue>(), Repeat<1>(DIGIT()),
-        Optional(Union(Idx<NumValSpecFields_SequenceValues>(), Repeat<1>(CharVal<'.'>(), Repeat<1>(DIGIT())), Sequence(CharVal<'-'>(), Idx<NumValSpecFields_RangeLastValue>(), Repeat<1>(DIGIT()))))));
+        Idx<INDEX_THIS>(), Optional(Union(Idx<NumValSpecFields_SequenceValues>(), Repeat<1>(CharVal<'.'>(), Repeat<1>(DIGIT())), Idx<NumValSpecFields_RangeLastValue>(), Sequence(CharVal<'-'>(), Repeat<1>(DIGIT()))))));
 
     // hex-val        =  "x" 1*HEXDIG
     //                   [ 1*("." 1*HEXDIG) / ("-" 1*HEXDIG) ]
     PARSER_RULE(hex_val, Sequence(CharVal<'x'>(), Idx<NumValSpecFields_FirstValue>(), Repeat<1>(HEXDIG()),
-        Optional(Union(Idx<NumValSpecFields_SequenceValues>(), Repeat<1>(CharVal<'.'>(), Repeat<1>(HEXDIG())), Sequence(CharVal<'-'>(), Idx<NumValSpecFields_RangeLastValue>(), Repeat<1>(HEXDIG()))))));
+        Idx<INDEX_THIS>(), Optional(Union(Idx<NumValSpecFields_SequenceValues>(), Repeat<1>(CharVal<'.'>(), Repeat<1>(HEXDIG())), Idx<NumValSpecFields_RangeLastValue>(), Sequence(CharVal<'-'>(), Repeat<1>(HEXDIG()))))));
 
     using NumValData = std::tuple<NumValSpecData, NumValSpecData, NumValSpecData>;
     enum NumValFields
@@ -116,7 +116,10 @@ namespace RFC5234ABNF
     // repetition     =  [repeat] element
     PARSER_RULE_CDATA(repetition, RepetitionData, Sequence(Optional(repeat()), element()));
 
-    using ConcatenationData = std::vector<RepetitionData>;
+    class ConcatenationData : public std::vector<RepetitionData>
+    {
+    };
+
     // concatenation  =  repetition *(1*c-wsp repetition)
     PARSER_RULE_CDATA(concatenation, ConcatenationData, HeadTail(repetition(), Idx<INDEX_NONE>(), Repeat<1>(c_wsp()), Idx<INDEX_THIS>(), repetition()));
 
