@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <functional>
 #include <iomanip>
+#include <iostream>
 #include <list>
 
 #define INDEX_NONE INT_MAX          // Used to define a primitive that has no specific member
@@ -175,43 +176,6 @@ namespace Impl
     }
 
     template <typename ELEM>
-    inline void ResizeIfNotNull(std::vector<ELEM> * elems, size_t newSize)
-    {
-        if (elems != nullptr)
-        {
-            elems->resize(newSize);
-        }
-    }
-
-    inline void ResizeIfNotNull(SubstringPos *, size_t newSize)
-    {
-    }
-
-    inline void ResizeIfNotNull(nullptr_t, size_t newSize)
-    {
-    }
-
-    template <typename ELEM>
-    inline size_t GetSizeIfNotNull(std::vector<ELEM> const * elems)
-    {
-        if (elems != nullptr)
-        {
-            return elems->size();
-        }
-        return 0;
-    }
-
-    inline size_t GetSizeIfNotNull(SubstringPos *)
-    {
-        return 0;
-    }
-
-    inline size_t GetSizeIfNotNull(nullptr_t)
-    {
-        return 0;
-    }
-
-    template <typename ELEM>
     inline ELEM ElemTypeOrNull(std::vector<ELEM> const *);
 
     inline nullptr_t ElemTypeOrNull(nullptr_t);
@@ -362,7 +326,7 @@ public:
     {
     }
     
-    static char const * Name() { return "Repeatition"; }
+    static char const * Name() { return "Repetition"; }
 
     inline PRIMITIVE const & Primitive() const { return primitive_; }
     inline PRIMITIVE & Primitive() { return primitive_; }
@@ -453,27 +417,32 @@ public:
     inline auto & LastRepeatErrors() { return lastRepeatErrors_; }
 
 public:
-    template <bool ALT, typename RESULT_PTR>
-    class SavedIOState : public SavedIOState<ALT, nullptr_t>
+    template <bool REPEAT, bool ALT, typename RESULT_PTR>
+    class SavedIOState : public SavedIOState<REPEAT, ALT, nullptr_t>
     {
-        using Base = SavedIOState<ALT, nullptr_t>;
+        using Base = SavedIOState<REPEAT, ALT, nullptr_t>;
         using ResultType = std::remove_pointer_t<RESULT_PTR>;
     protected:
         RESULT_PTR result_;
 
     private:
-        template <typename ELEM_TYPE>
+        template <bool REPEAT2>
+        static inline nullptr_t GetPreviousState(SubstringPos * result)
+        {
+            return nullptr;
+        }
+
+        template <bool REPEAT2, typename ELEM_TYPE>
         static inline size_t GetPreviousState(std::vector<ELEM_TYPE> * result)
         {
             return result->size();
         }
 
-        template <typename RESULT2_PTR>
+        template <bool REPEAT2, typename RESULT2_PTR, std::enable_if_t<REPEAT2 == false, void *> = nullptr>
         static inline nullptr_t GetPreviousState(RESULT2_PTR result)
         {
             return nullptr;
         }
-
 
         template <typename ELEM_TYPE>
         static inline void SetPreviousState(std::vector<ELEM_TYPE> * result, size_t previousState)
@@ -487,7 +456,7 @@ public:
             *result = {};
         }
 
-        decltype(GetPreviousState(result_)) previousState_;
+        decltype(GetPreviousState<REPEAT>(result_)) previousState_;
 
         template <typename RESULT2_PTR>
         static inline void SetResult(RESULT2_PTR result, SubstringPos newResult)
@@ -500,15 +469,23 @@ public:
         }
     public:
         inline SavedIOState(ParserIO & parent, RESULT_PTR result, char const * ruleName)
-            : Base(parent, nullptr, ruleName), previousState_(GetPreviousState(result)), result_(result)
+            : Base(parent, nullptr, ruleName), previousState_(GetPreviousState<REPEAT>(result)), result_(result)
         {
+        }
+
+        template <bool WHOLE>
+        inline void Reset()
+        {
+            SetPreviousState(result_, previousState_);
+            if (WHOLE)
+                Base::Reset<true>();
         }
 
         inline ~SavedIOState()
         {
             if (this->outputPos_ != -1)
             {
-                SetPreviousState(result_, previousState_);
+                Reset<false>();
             }
         }
 
@@ -535,8 +512,8 @@ public:
         }
     };
     
-    template <>
-    class SavedIOState<false, nullptr_t>
+    template <bool REPEAT>
+    class SavedIOState<REPEAT, false, nullptr_t>
     {
     protected:
         ParserIO & parent_;
@@ -549,6 +526,13 @@ public:
             : parent_(parent), inputPos_(parent.Input().Pos()), outputPos_(parent.Output().Pos()),
             errorsSize_(parent.Errors().size()), ruleName_(ruleName)
         {
+        }
+
+        template <bool WHOLE>
+        inline void Reset()
+        {
+            parent_.Input().SetPos(inputPos_);
+            parent_.Output().SetPos(outputPos_);
         }
 
         inline ~SavedIOState()
@@ -570,8 +554,7 @@ public:
                         error(cerr, indent + "  ");
                     }
                 });
-                parent_.Input().SetPos(inputPos_);
-                parent_.Output().SetPos(outputPos_);
+                Reset<false>();
             }
             else
             {
@@ -602,10 +585,10 @@ public:
         }
     };
 
-    template <typename RESULT_PTR> 
-    class SavedIOState<true, RESULT_PTR> : public SavedIOState<false, RESULT_PTR>
+    template <bool REPEAT, typename RESULT_PTR> 
+    class SavedIOState<REPEAT, true, RESULT_PTR> : public SavedIOState<false, false, RESULT_PTR>
     {
-        using Base = SavedIOState<false, RESULT_PTR>;
+        using Base = SavedIOState<false, false, RESULT_PTR>;
         size_t bestLength_ = 0;
         size_t bestOutputPos_ = 0;
         size_t bestInputPos_ = 0;
@@ -645,7 +628,7 @@ public:
                 bestInputPos_ = parent_.Input().Pos();
                 SaveAlternative(PtrToBestAlternative(bestAlternative_), this->Result());
                 // resets to the initial state to parse another alternative
-                this->~SavedIOState();
+                this->Reset<true>();
             }
         }
 
@@ -672,10 +655,10 @@ public:
         }
     };
 
-    template <bool ALT, typename RESULT_PTR>
-    inline SavedIOState<ALT, RESULT_PTR> Save(RESULT_PTR & result, char const * ruleName)
+    template <bool REPEAT, bool ALT, typename RESULT_PTR>
+    inline auto Save(RESULT_PTR & result, char const * ruleName)
     {
-        return SavedIOState<ALT, RESULT_PTR>(*this, result, ruleName);
+        return SavedIOState<REPEAT, ALT, RESULT_PTR>(*this, result, ruleName);
     }
 };
 
@@ -683,6 +666,15 @@ template <typename INPUT, typename CHAR_TYPE>
 inline ParserIO<INPUT, CHAR_TYPE> Make_Parser(INPUT && input, CHAR_TYPE charType)
 {
     return ParserIO<INPUT, CHAR_TYPE>(input);
+}
+
+template <typename CHAR_TYPE>
+inline auto Make_ParserFromStream(std::basic_istream<CHAR_TYPE> & is)
+{
+    return Make_Parser([&] () mutable
+    {
+        return is.get();
+    }, (CHAR_TYPE)0);
 }
 
 template <typename CHAR_TYPE>
@@ -696,6 +688,16 @@ inline auto Make_ParserFromString(std::basic_string<CHAR_TYPE> const & str)
         }
         return EOF;
     }, (CHAR_TYPE)0);
+}
+
+inline bool IsEmpty(SubstringPos const & sub)
+{
+    return sub.second <= sub.first;
+}
+
+inline bool IsEmpty(nullptr_t)
+{
+    return true;
 }
 
 template <typename ELEM>
@@ -727,6 +729,50 @@ inline bool IsEmpty(std::vector<ELEM> const & arr)
     for (auto const & elem : arr)
     {
         if (false == IsEmpty(elem))
+            return false;
+    }
+    return true;
+}
+
+inline bool IsNull(SubstringPos const & sub)
+{
+    return IsEmpty(sub) && sub.first == 0;
+}
+
+inline bool IsNull(nullptr_t)
+{
+    return true;
+}
+
+template <typename ELEM>
+inline bool IsNull(std::vector<ELEM> const & arr);
+
+template <size_t OFFSET, typename... ARGS>
+inline bool IsNull(std::tuple<ARGS...> const & tuple);
+
+template <typename... ARGS>
+inline bool IsNull(std::tuple<ARGS...> const & tuple)
+{
+    return IsNull<0>(tuple);
+}
+
+template <size_t OFFSET, typename... ARGS>
+inline bool IsNull(std::tuple<ARGS...> const & tuple)
+{
+    enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(ARGS) - 1) };
+    if (false == IsNull(std::get<OFFSET>(tuple)))
+        return false;
+    if (NEXT_OFFSET > OFFSET)
+        return IsNull<NEXT_OFFSET>(tuple);
+    return true;
+}
+
+template <typename ELEM>
+inline bool IsNull(std::vector<ELEM> const & arr)
+{
+    for (auto const & elem : arr)
+    {
+        if (false == IsNull(elem))
             return false;
     }
     return true;
@@ -848,7 +894,7 @@ namespace Impl
 template <typename PARSER, typename DEST_PTR, typename SEQ_TYPE, typename... PRIMITIVES>
 inline bool Parse(PARSER & parser, DEST_PTR dest, char const * ruleName, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
 {
-    auto ioState(parser.Save<SEQ_TYPE::value != SeqTypeSeq::value>(dest, ruleName));
+    auto ioState(parser.Save<false, SEQ_TYPE::value != SeqTypeSeq::value>(dest, ruleName));
     if (Impl::ParseItem<0, 0>(parser, ioState, dest, std::get<0>(what.Primitives()), what))
     {
         return ioState.Success();
@@ -856,22 +902,12 @@ inline bool Parse(PARSER & parser, DEST_PTR dest, char const * ruleName, Sequenc
     return false;
 }
 
-inline bool IsEmpty(SubstringPos const & sub)
-{
-    return sub.second <= sub.first;
-}
-
-inline bool IsEmpty(nullptr_t)
-{
-    return true;
-}
-
 template <typename PARSER, typename ELEMS_PTR, size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
 inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & what)
 {
     size_t count = 0;
 
-    auto ioState(parser.Save<false>(elems, ruleName));
+    auto ioState(parser.Save<true, false>(elems, ruleName));
 
     for (; count < MAX_COUNT; ++count)
     {
@@ -879,7 +915,7 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, Repea
         if (Parse(parser, Impl::PtrOrNull(elem), what.Primitive().Name(), what.Primitive()))
         {
             if (false == IsEmpty(elem))
-                Impl::PushBackIfNotNull(elems, elem);
+                Impl::PushBackIfNotNull(elems, std::move(elem));
         }
         else
         {
