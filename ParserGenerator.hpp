@@ -1,3 +1,7 @@
+// (c) 2019 ptaahfr http://github.com/ptaahfr
+// All right reserved, for educational purposes
+//
+// ABNF parser generation
 #pragma once
 
 #include <vector>
@@ -8,11 +12,11 @@
 
 #include "ParserRFC5234.hpp"
 
-void GenerateParser(std::ostream & os, RFC5234ABNF::RuleListData const & rules, std::vector<char> const & buffer)
+void GenerateABNFParser(std::ostream & os, RFC5234ABNF::RuleListData const & rules, std::vector<char> const & buffer)
 {
     using namespace RFC5234ABNF;
 
-    std::map<std::string, std::tuple<std::list<std::string>, std::string> > mapRules;
+    std::map<std::string, std::tuple<std::list<std::string>, std::list<std::string> > > mapRules;
 
     auto transformRulename = [&] (auto const & ruleNameField)
     {
@@ -24,6 +28,7 @@ void GenerateParser(std::ostream & os, RFC5234ABNF::RuleListData const & rules, 
     for (auto const & rule : rules)
     {
         std::stringstream cout; // << "PARSER_RULE(" << transformRulename(std::get<RuleFields_Rulename>(rule)) << ", ";
+        std::list<std::string> alternatives;
         std::list<std::string> dependencies;
         std::function<void(AlternationData const &)> generateAlternation;
 
@@ -239,9 +244,29 @@ void GenerateParser(std::ostream & os, RFC5234ABNF::RuleListData const & rules, 
             }
         };
 
-        generateAlternation(std::get<RuleFields_Elements>(rule));
+        for (auto const & concatenation : std::get<RuleFields_Elements>(rule))
+        {
+            generateConcatenation(concatenation);
+            alternatives.push_back(cout.str());
+            cout = std::stringstream();
+        }
 
-        mapRules[transformRulename(std::get<RuleFields_Rulename>(rule))] = std::make_tuple(std::move(dependencies), cout.str());
+        std::string ruleName(transformRulename(std::get<RuleFields_Rulename>(rule)));
+        std::string definedAs(ToString(buffer, std::get<RuleFields_DefinedAs>(rule)));
+        
+        if (definedAs.find("=/") != std::string::npos)
+        {
+            auto & ruleEntryPtr(mapRules.find(ruleName));
+            if (ruleEntryPtr != mapRules.end())
+            {
+                std::get<0>(ruleEntryPtr->second).splice(std::get<0>(ruleEntryPtr->second).end(), dependencies);
+                std::get<1>(ruleEntryPtr->second).splice(std::get<1>(ruleEntryPtr->second).end(), alternatives);
+            }
+        }
+        else
+        {
+            mapRules[ruleName] = std::make_tuple(std::move(dependencies), std::move(alternatives));
+        }
     }
 
     std::set<std::string> parsingRules, parsedRules, parsedRulesForward;
@@ -279,7 +304,28 @@ void GenerateParser(std::ostream & os, RFC5234ABNF::RuleListData const & rules, 
                     os << "PARSER_RULE(";
                 }
 
-                os << ruleName << ", " << std::get<1>(ruleEntryPtr->second) << ")" << std::endl << std::endl;
+                os << ruleName << ", ";
+                
+                if (std::get<1>(ruleEntryPtr->second).size() > 1)
+                {
+                    os << "Alternatives(";
+                }
+
+                bool first = true;
+                for (auto const & alt : std::get<1>(ruleEntryPtr->second))
+                {
+                    if (!first)
+                        os << ", ";
+                    first = false;
+                    os << alt;
+                }
+
+                if (std::get<1>(ruleEntryPtr->second).size() > 1)
+                {
+                    os << ")";
+                }
+
+                os << ");" << std::endl << std::endl;
             }
             parsedRules.insert(ruleName);
         }

@@ -84,6 +84,7 @@ concatenation  =  repetition *(1*c-wsp repetition)
 repetition     =  [repeat] element
 
 repeat         =  1*DIGIT / (*DIGIT "*" *DIGIT)
+repeat =/ DIGIT ; Added to test =/
 
 element        =  rulename / group / option /
                 char-val / num-val / prose-val
@@ -124,7 +125,7 @@ prose-val      =  "<" *(%x20-3D / %x3F-7E) ">"
     if (ParseExact(parser, &rules))
     {
         std::cout << "Success" << std::endl;
-        GenerateParser(std::cout, rules, parser.OutputBuffer());
+        GenerateABNFParser(std::cout, rules, parser.OutputBuffer());
     }
     else
     {
