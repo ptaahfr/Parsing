@@ -16,6 +16,7 @@ void GenerateABNFParser(std::ostream & os, RFC5234ABNF::RuleListData const & rul
 {
     using namespace RFC5234ABNF;
 
+    std::map<std::string, std::string> mapDatas;
     std::map<std::string, std::tuple<std::list<std::string>, std::list<std::string> > > mapRules;
 
     auto transformRulename = [&] (auto const & ruleNameField)
@@ -27,14 +28,13 @@ void GenerateABNFParser(std::ostream & os, RFC5234ABNF::RuleListData const & rul
 
     for (auto const & rule : rules)
     {
-        std::stringstream cout; // << "PARSER_RULE(" << transformRulename(std::get<RuleFields_Rulename>(rule)) << ", ";
         std::list<std::string> alternatives;
         std::list<std::string> dependencies;
-        std::function<void(AlternationData const &)> generateAlternation;
+        std::function<std::string(AlternationData const &)> generateAlternation;
 
         auto generateChar = [&](auto value, char const * prefix)
         {
-            cout << "CharVal<" << prefix << ToString(buffer, value) << ">()";
+            return std::string("CharVal<") + prefix + ToString(buffer, value) + ">()";
         };
 
         auto generateNumValSpec = [&](NumValSpecData const & numValSpec, char const * prefix)
@@ -42,26 +42,27 @@ void GenerateABNFParser(std::ostream & os, RFC5234ABNF::RuleListData const & rul
             auto const & firstValue(std::get<NumValSpecFields_FirstValue>(numValSpec));
             auto const & seqValues(std::get<NumValSpecFields_SequenceValues>(numValSpec));
             auto const & rangeLastValue(std::get<NumValSpecFields_RangeLastValue>(numValSpec));
-
+            std::stringstream ss;
             if (!IsNull(seqValues))
             {
-                cout << "Sequence(";
+                ss << "Sequence(";
                 generateChar(firstValue, prefix);
                 for (auto const & seqValue : seqValues)
                 {
-                    cout << ", ";
+                    ss << ", ";
                     generateChar(seqValue, prefix);
                 }
-                cout << ")";
+                ss << ")";
             }
             else if (!IsNull(rangeLastValue))
             {
-                cout << "CharRange<" << prefix << ToString(buffer, firstValue) << ", " << prefix << ToString(buffer, rangeLastValue) << ">()";
+                ss << "CharRange<" << prefix << ToString(buffer, firstValue) << ", " << prefix << ToString(buffer, rangeLastValue) << ">()";
             }
             else
             {
-                generateChar(firstValue, prefix);
+                ss << generateChar(firstValue, prefix);
             }
+            return ss.str();
         };
 
         auto generateNumVal = [&](NumValData const & numVal)
@@ -69,18 +70,18 @@ void GenerateABNFParser(std::ostream & os, RFC5234ABNF::RuleListData const & rul
             auto const & hexVal(std::get<NumValFields_Hex>(numVal));
             if (!IsNull(hexVal))
             {
-                generateNumValSpec(hexVal, "0x");
+                return generateNumValSpec(hexVal, "0x");
             }
             else
             {
                 auto const & binVal(std::get<NumValFields_Bin>(numVal));
                 if (!IsNull(binVal))
                 {
-                    generateNumValSpec(binVal, "0b");
+                    return generateNumValSpec(binVal, "0b");
                 }
                 else
                 {
-                    generateNumValSpec(std::get<NumValFields_Dec>(numVal), "");
+                    return generateNumValSpec(std::get<NumValFields_Dec>(numVal), "");
                 }
             }
         };
@@ -96,25 +97,31 @@ void GenerateABNFParser(std::ostream & os, RFC5234ABNF::RuleListData const & rul
                 size_t length(std::get<1>(charValOrProseVal) - std::get<0>(charValOrProseVal));
                 if (length > 2)
                 {
+                    std::stringstream ss;
                     if (length > 3 && !insideRepeat)
                     {
-                        cout << "Sequence(";
+                        ss << "Sequence(";
                     }
 
                     bool first = true;
                     for (size_t t = std::get<0>(charValOrProseVal) + 1; t < std::get<1>(charValOrProseVal) - 1; ++t)
                     {
                         if (!first)
-                            cout << ", ";
+                            ss << ", ";
                         first = false;
 
-                        cout << "CharVal<0x" << std::uppercase << std::hex << std::setfill('0') << std::setw(2) << (MaxCharType)buffer[t] << ">()";
+                        ss << "CharVal<0x" << std::uppercase << std::hex << std::setfill('0') << std::setw(2) << (MaxCharType)buffer[t] << ">()";
                     }
 
                     if (length > 3 && !insideRepeat)
                     {
-                        cout << ")";
+                        ss << ")";
                     }
+                    return ss.str();
+                }
+                else
+                {
+                    return std::string();
                 }
             }
             else
@@ -122,29 +129,27 @@ void GenerateABNFParser(std::ostream & os, RFC5234ABNF::RuleListData const & rul
                 auto const & numVal(std::get<ElementFields_NumVal>(element));
                 if (!IsNull(numVal))
                 {
-                    generateNumVal(numVal);
+                    return generateNumVal(numVal);
                 }
                 else
                 {
                     auto const & group(std::get<ElementFields_Group>(element));
                     if (!IsNull(group))
                     {
-                        generateAlternation(group);
+                        return generateAlternation(group);
                     }
                     else
                     {
                         auto const & option(std::get<ElementFields_Option>(element));
                         if (!IsNull(option))
                         {
-                            cout << "Optional(";
-                            generateAlternation(option);
-                            cout << ")";
+                            return "Optional(" + generateAlternation(option) + ")";
                         }
                         else
                         {
                             std::string otherRuleName(transformRulename(std::get<ElementFields_Rulename>(element)));
                             dependencies.push_back(otherRuleName);
-                            cout << otherRuleName << "()";
+                            return otherRuleName + "()";
                         }
                     }
                 }
@@ -157,98 +162,101 @@ void GenerateABNFParser(std::ostream & os, RFC5234ABNF::RuleListData const & rul
             auto const & element(std::get<RepetitionFields_Element>(repetition));
 
             bool insideRepeat(!IsNull(repeat));
-
+            std::stringstream ss;
             if (insideRepeat)
             {
-                cout << "Repeat";
+                ss << "Repeat";
 
                 if (!IsEmpty(repeat))
                 {
                     auto const & fixed(std::get<RepeatFields_Fixed>(repeat));
                     auto const & range(std::get<RepeatFields_Range>(repeat));
 
-                    cout << "<";
+                    ss << "<";
 
                     if (!IsEmpty(fixed))
                     {
                         auto num(ToString(buffer, fixed));
-                        cout << num << ", " << num << ">(";
+                        ss << num << ", " << num << ">(";
                     }
                     else if (IsEmpty(std::get<0>(range)))
                     {
-                        cout << "0, " << ToString(buffer, std::get<1>(range));
+                        ss << "0, " << ToString(buffer, std::get<1>(range));
                     }
                     else if (IsEmpty(std::get<1>(range)))
                     {
-                        cout << ToString(buffer, std::get<0>(range));
+                        ss << ToString(buffer, std::get<0>(range));
                     }
                     else
                     {
-                        cout << ToString(buffer, std::get<0>(range)) << ", " << ToString(buffer, std::get<1>(range)) << ">(";
+                        ss << ToString(buffer, std::get<0>(range)) << ", " << ToString(buffer, std::get<1>(range)) << ">(";
                     }
 
-                    cout << ">";
+                    ss << ">";
                 }
 
-                cout << "(";
+                ss << "(";
             }
 
-            generateElement(element, insideRepeat);
+            ss << generateElement(element, insideRepeat);
 
             if (insideRepeat)
             {
-                cout << ")";
+                ss << ")";
             }
+
+            return ss.str();
         };
 
         auto generateConcatenation = [&](ConcatenationData const & concatenation)
         {
             if (concatenation.size() == 1)
             {
-                generateRepetition(concatenation.front());
+                return generateRepetition(concatenation.front());
             }
             else
             {
                 bool first = true;
-                cout << "Sequence(";
+                std::stringstream ss;
+                ss << "Sequence(";
                 for (auto const & repetition : concatenation)
                 {
                     if (!first)
-                        cout << ", ";
+                        ss << ", ";
                     first = false;
-                    generateRepetition(repetition);
+                    ss << generateRepetition(repetition);
                 }
-                cout << ")";
+                ss << ")";
+                return ss.str();
             }
-            // cout << 
         };
 
         generateAlternation = [&](AlternationData const & alternation)
         {
             if (alternation.size() == 1)
             {
-                generateConcatenation(alternation.front());
+                return generateConcatenation(alternation.front());
             }
             else
             {
                 bool first = true;
-                cout << "Alternatives(";
+                std::stringstream ss;
+                ss << "Alternatives(";
                 for (auto const & concatenation : alternation)
                 {
                     if (!first)
-                        cout << ", ";
+                        ss << ", ";
                     first = false;
-                    generateConcatenation(concatenation);
+                    ss << generateConcatenation(concatenation);
                 }
-                cout << ")";
+                ss << ")";
+                return ss.str();
             }
         };
 
         for (auto const & concatenation : std::get<RuleFields_Elements>(rule))
         {
-            generateConcatenation(concatenation);
-            alternatives.push_back(cout.str());
-            cout = std::stringstream();
+            alternatives.push_back(generateConcatenation(concatenation));
         }
 
         std::string ruleName(transformRulename(std::get<RuleFields_Rulename>(rule)));
