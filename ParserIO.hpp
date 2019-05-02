@@ -157,7 +157,7 @@ public:
             return result->size();
         }
 
-        template <bool REPEAT2, typename RESULT2_PTR, std::enable_if_t<REPEAT2 == false, void *> = nullptr>
+        template <bool REPEAT2, typename RESULT2_PTR, ENABLED_IF(REPEAT2 == false)>
         static inline nullptr_t GetPreviousState(RESULT2_PTR result)
         {
             return nullptr;
@@ -324,7 +324,7 @@ public:
         }
 
         std::remove_reference_t<decltype(SaveAlternative(std::declval<RESULT_PTR>(), std::declval<RESULT_PTR>()))> bestAlternative_;
-        
+
         template <typename RESULT>
         static inline RESULT * PtrToBestAlternative(RESULT & r)
         {
