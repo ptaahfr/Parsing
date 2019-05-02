@@ -6,7 +6,7 @@
 // some rules from the ABNF RFC core
 #pragma once
 
-#include "ParserBase.hpp"
+#include "ParserGrammar.hpp"
 
 // Core rules as defined in the Appendix B https://tools.ietf.org/html/rfc5234#appendix-B
 

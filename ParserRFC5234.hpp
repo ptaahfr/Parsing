@@ -4,9 +4,7 @@
 // ABNF rules
 #pragma once
 
-#include "ParserBase.hpp"
 #include "ParserCore.hpp"
-
 
 namespace RFC5234ABNF
 {

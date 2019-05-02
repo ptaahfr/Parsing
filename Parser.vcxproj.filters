@@ -33,6 +33,12 @@
     <ClInclude Include="ParserGenerator.hpp">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="ParserIO.hpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ParserGrammar.hpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Parser.cpp">
