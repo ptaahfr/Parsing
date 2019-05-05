@@ -8,6 +8,7 @@
 
 #include "ParserBase.hpp"
 #include <tuple>
+#include <cctype>
 
 template <MaxCharType... CODES>
 class CharVal
@@ -41,11 +42,25 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
     return inputChar >= CH1 && inputChar <= CH2;
 }
 
+template <typename BASE>
+class DefaultDataT : public std::remove_reference_t<BASE>
+{
+};
+
+template <>
+class DefaultDataT<nullptr_t>
+{
+public:
+    inline operator nullptr_t() const { return nullptr; }
+};
 
 #define PARSER_RULE_FORWARD(name) \
     class name { public: \
         static char const * Name() { return #name; } \
-    };
+    }; \
+    class IsConstant_##name IsConstant(name); \
+    class IsRawVariable_##name IsRawVariable(name); \
+    class DefaultData_##name DefaultData(name);
 
 #define PARSER_RULE_PARTIAL(name, ...) \
     template <typename PARSER, typename TYPE> \
@@ -66,8 +81,9 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
         } \
         return false; \
     } \
-    auto IsConstant(name) -> decltype(IsConstant(__VA_ARGS__));
-    //auto DefaultData(name) -> decltype(DefaultData(__VA_ARGS__)); \
+    class IsConstant_##name : public DefaultDataT<decltype(IsConstant(__VA_ARGS__))> {}; \
+    class IsRawVariable_##name : public DefaultDataT<decltype(IsRawVariable(__VA_ARGS__))> {}; \
+    class DefaultData_##name : public DefaultDataT<decltype(DefaultData(__VA_ARGS__))> {};
 
 #define PARSER_RULE_PARTIAL_CDATA(name, data, ...) \
     PARSER_RULE_PARTIAL(name, __VA_ARGS__) \
@@ -183,6 +199,7 @@ inline auto HeadTail(PRIMITIVE primitiveHead, OTHER_PRIMITIVES... primitiveTail)
     return Sequence(Idx<INDEX_THIS>(), Repeat<1, 1>(primitiveHead), Idx<INDEX_THIS>(), Repeat(primitiveTail...));
 }
 
+
 template <typename PRIMITIVE>
 inline std::false_type IsConstant(PRIMITIVE const & primitive);
 
@@ -213,29 +230,41 @@ inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...
                                   + CONSTANT(CountVariables(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >())))>;
 
 template <int CODE>
-inline std::false_type IsRawVariable(CharVal<CODE> const & primitive);
+std::false_type IsRawVariable(CharVal<CODE> const & primitive);
+
+template <int... CODES, ENABLED_IF(sizeof...(CODES) > 1)>
+std::true_type IsRawVariable(CharVal<CODES...> const & primitive);
 
 template <int CH1, int CH2>
-inline auto IsRawVariable(CharRange<CH1, CH2> const & primitive) -> decltype(std::bool_constant<(CH2 > CH1)>());
+auto IsRawVariable(CharRange<CH1, CH2> const & primitive) -> decltype(std::bool_constant<(CH2 > CH1)>());
 
 template <typename SEQ_TYPE, typename PRIMITIVE>
-inline auto IsRawVariable(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence) -> decltype(IsRawVariable(std::declval<PRIMITIVE>()));
+auto IsRawVariable(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence) -> decltype(IsRawVariable(std::declval<PRIMITIVE>()));
+
+template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
+auto IsRawVariable(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & sequence) -> decltype(IsRawVariable(std::declval<PRIMITIVE>()));
 
 template <typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(sizeof...(OTHER_PRIMITIVES) > 0)>
-inline auto IsRawVariable(SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+auto IsRawVariable(SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
 -> std::bool_constant<CONSTANT(IsRawVariable(std::declval<PRIMITIVE>()))
                    && CONSTANT(IsRawVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>;
 
-template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
-inline auto IsRawVariable(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & sequence) -> decltype(IsRawVariable(std::declval<PRIMITIVE>()));
+template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES,
+    ENABLED_IF((SEQ_TYPE::value != SeqTypeSeq::value) && (sizeof...(OTHER_PRIMITIVES) > 0))>
+auto IsRawVariable(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+-> std::bool_constant<(CONSTANT(IsRawVariable(std::declval<PRIMITIVE>())) || CONSTANT(IsConstant(std::declval<PRIMITIVE>())))
+                   && (CONSTANT(IsRawVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))
+                        || CONSTANT(IsConstant(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >())))>;
+
+template <typename SEQ_TYPE, size_t INDEX, typename... OTHER_PRIMITIVES>
+auto IsRawVariable(SequenceType<SEQ_TYPE, Idx<INDEX>, OTHER_PRIMITIVES...> const & sequence)
+-> decltype(IsRawVariable(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >()));
 
 template <typename PRIMITIVE>
 auto IsStructured(PRIMITIVE const & primitive)
 -> std::bool_constant<
-       (false == CONSTANT(IsRawVariable(std::decval<PRIMITIVE>()))
-    && (false == CONSTANT(IsConstant(std::decval<PRIMITIVE>()))))>;
-
-#include <cctype>
+       (false == CONSTANT(IsRawVariable(std::declval<PRIMITIVE>()))
+    && (false == CONSTANT(IsConstant(std::declval<PRIMITIVE>()))))>;
 
 template <MaxCharType CODE, typename OSTREAM>
 inline void CodesToString(OSTREAM & os)
@@ -426,7 +455,7 @@ namespace Impl
 template <typename PARSER, typename DEST_PTR, typename SEQ_TYPE, typename... PRIMITIVES>
 inline bool Parse(PARSER & parser, DEST_PTR dest, char const * ruleName, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
 {
-    auto ioState(parser.Save<false, SEQ_TYPE::value != SeqTypeSeq::value>(dest, ruleName));
+    auto ioState(parser.template Save<false, SEQ_TYPE::value != SeqTypeSeq::value>(dest, ruleName));
     if (Impl::ParseItem<0, 0>(parser, ioState, dest, std::get<0>(what.Primitives()), what))
     {
         return ioState.Success();
@@ -439,7 +468,7 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, Repea
 {
     size_t count = 0;
 
-    auto ioState(parser.Save<true, false>(elems, ruleName));
+    auto ioState(parser.template Save<true, false>(elems, ruleName));
 
     for (; count < MAX_COUNT; ++count)
     {
@@ -477,9 +506,17 @@ template <typename PRIMITIVE, ENABLED_IF(CONSTANT(IsRawVariable(std::declval<PRI
 SubstringPos DefaultData(PRIMITIVE const & primitive);
 
 template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
-auto DefaultData(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & primitive)
--> std::vector<decltype(DefaultData(primitive.Primitive()))>;
-//
-//template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(0 < sizeof...(OTHER_PRIMITIVES))>
-//auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & primitives)
-//-> std::vector<decltype(DefaultData(primitive.Primitive()))>;
+auto DefaultData(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & repetition)
+-> std::vector<decltype(DefaultData(repetition.Primitive()))>;
+
+template <typename SEQ_TYPE, typename PRIMITIVE>
+auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence)
+-> decltype(DefaultData(std::get<0>(sequence)));
+
+template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES,
+    ENABLED_IF((0 < sizeof...(OTHER_PRIMITIVES))
+        && CONSTANT(IsStructured(std::declval<SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> >())))>
+auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+-> decltype(std::tuple_cat(
+    std::make_tuple(DefaultData(std::declval<PRIMITIVE>())),
+    DefaultData(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >())));

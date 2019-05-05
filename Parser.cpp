@@ -8,14 +8,17 @@
 #endif
 
 #define PARSER_LF_AS_CRLF
+#define PARSER_TEST_CORE_ONLY
 
 #include "ParserIO.hpp"
 #include "ParserCore.hpp"
 #include <algorithm>
 
+#ifndef PARSER_TEST_CORE_ONLY
 #include "ParserRFC5322Data.hpp"
 #include "ParserRFC5322Rules.hpp"
 #include "ParserRFC5234.hpp"
+#endif
 
 #include <iostream>
 
@@ -29,6 +32,8 @@
     else \
         std::cout << " succeed" << std::endl; \
 }
+
+#ifndef PARSER_TEST_CORE_ONLY
 
 void TestRFC5234()
 {
@@ -117,6 +122,8 @@ prose-val      =  "<" *(%x20-3D / %x3F-7E) ">"
                     ;  last resort
 )ABNF";
     using namespace RFC5234ABNF;
+
+    //cout << CONSTANT(IsRawVariable(CharRange<0, 20>())) << std::endl;
 
     std::cout << "Parsing ABNF rules... ";
 
@@ -233,8 +240,21 @@ void test_address(std::string const & addr)
     std::cout << std::endl;
 }
 
+#endif
+
+void Test_Parser_Core()
+{
+    using namespace RFC5234Core;
+
+    decltype(DefaultData(ALPHA())) data;
+    //data.
+}
+
 int main()
 {
+    Test_Parser_Core();
+
+#ifndef PARSER_TEST_CORE_ONLY
     //TestRFC5322();
     //TestRFC5234();
 
@@ -268,6 +288,7 @@ int main()
     test_address("this is\"not\\allowed@example.com");
     test_address("this\\ still\\\"not\\\\allowed@example.com");
     test_address("1234567890123456789012345678901234567890123456789012345678901234+x@example.com");
+#endif
 
     return 0;
 }

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <vector>
 #include <cassert>
+#include <algorithm>
 
 #define ENABLED_IF(condition) std::enable_if_t<(condition), void *> = nullptr
 #define ENABLED_IF_DEF(condition) std::enable_if_t<(condition), void *>

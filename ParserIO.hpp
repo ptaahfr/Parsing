@@ -197,7 +197,7 @@ public:
         {
             SetPreviousState(result_, previousState_);
             if (WHOLE)
-                Base::Reset<true>();
+                Base::template Reset<true>();
         }
 
         inline ~SavedIOState()
@@ -343,11 +343,11 @@ public:
             if (length > bestLength_)
             {
                 bestLength_ = length;
-                bestOutputPos_ = parent_.Output().Pos();
-                bestInputPos_ = parent_.Input().Pos();
+                bestOutputPos_ = this->parent_.Output().Pos();
+                bestInputPos_ = this->parent_.Input().Pos();
                 SaveAlternative(PtrToBestAlternative(bestAlternative_), this->Result());
                 // resets to the initial state to parse another alternative
-                this->Reset<true>();
+                this->template Reset<true>();
             }
         }
 
