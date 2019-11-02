@@ -15,7 +15,10 @@
 
 #define ENABLED_IF(condition) std::enable_if_t<(condition), void *> = nullptr
 #define ENABLED_IF_DEF(condition) std::enable_if_t<(condition), void *>
+#define ENABLED_IF_RET(condition, return_type) std::enable_if_t<(condition), return_type>
 #define CONSTANT(...) std::remove_reference_t<decltype(__VA_ARGS__)>::value
+#define CONSTANT_F(funcname, ...) std::remove_reference_t<decltype(funcname(std::declval<__VA_ARGS__>()))>::value
+#define TYPE_F(funcname, ...) typename std::remove_reference_t<decltype(funcname(std::declval<__VA_ARGS__>()))>
 
 using MaxCharType = int;
 

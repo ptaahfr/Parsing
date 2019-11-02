@@ -8,7 +8,7 @@
 #endif
 
 #define PARSER_LF_AS_CRLF
-#define PARSER_TEST_CORE_ONLY
+//#define PARSER_TEST_CORE_ONLY
 
 #include "ParserIO.hpp"
 #include "ParserCore.hpp"
@@ -242,12 +242,139 @@ void test_address(std::string const & addr)
 
 #endif
 
+template <typename TYPE>
+class ToPrimitiveClass
+{
+public:
+    using type = TYPE_F(ToPrimitive, TYPE);
+};
+
+
+PARSER_RULE_FORWARD(CContent)
+
+PARSER_RULE(Comment, Repeat(CContent()))
+
+// ccontent        =   ctext / quoted-pair / comment
+PARSER_RULE_PARTIAL(CContent, Alternatives(RFC5234Core::ALPHA(), Comment()))
+
+template <typename RULE>
+class DataForRule;
+
+template <int CH1, int CH2>
+class DataForRule<CharRange<CH1, CH2> >
+{
+public:
+    using type = SubstringPos;
+};
+
+template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE_OR_RULE>
+class DataForRule<RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> >
+{
+public:
+    using type = typename Impl::RepeatDataType<typename DataForRule<PRIMITIVE_OR_RULE>::type>::type;
+};
+
+class DataCContent;
+
+template <>
+class DataForRule<CContent>
+{
+public:
+    using type = DataCContent;
+};
+
+class DataComment : public DataForRule<decltype(Repeat(CContent()))>::type
+{
+};
+
+template <>
+class DataForRule<Comment>
+{
+public:
+    using type = DataComment;
+};
+
+class DataALPHA : public DataForRule<decltype(CharRange<0x41, 0x5A>())>::type
+{
+};
+
+template <>
+class DataForRule<RFC5234Core::ALPHA>
+{
+public:
+    using type = DataALPHA;
+};
+
+namespace Impl
+{
+    template <typename... TYPES>
+    class SeqDataType2;
+
+    template <typename TYPE1, typename... OTHER_TYPES>
+    class SeqDataType2<TYPE1, OTHER_TYPES...>
+    {
+    public:
+        using type = decltype(Cat(
+            std::declval<typename DataForRule<TYPE1>::type>(),
+            std::declval<typename SeqDataType2<OTHER_TYPES...>::type>()));
+    };
+    
+    template <typename TYPE1, typename TYPE2>
+    class SeqDataType2<TYPE1, TYPE2>
+    {
+    public:
+        using type = decltype(Cat(
+            std::declval<typename DataForRule<TYPE1>::type>(),
+            std::declval<typename DataForRule<TYPE2>::type>()));
+    };
+
+    template <typename TYPE1>
+    class SeqDataType2<TYPE1>
+    {
+    public:
+        //using type = DATATYPEFOR(TYPE1);
+        using type = typename DataForRule<TYPE1>::type;
+    };
+}
+
+template <typename SEQ_TYPE, typename... PRIMITIVES>
+class DataForRule<SequenceType<SEQ_TYPE, PRIMITIVES...> >
+{
+public:
+    using type = typename Impl::Detuplify<
+        typename Impl::SeqDataType2<PRIMITIVES...>::type
+    >::type;
+};
+
+class DataCContent : public DataForRule<decltype(Alternatives(RFC5234Core::ALPHA(), Comment()))>
+{
+};
+
 void Test_Parser_Core()
 {
     using namespace RFC5234Core;
+    using namespace RFC5234ABNF;
+//    using namespace RFC5322;
 
-    decltype(DefaultData(ALPHA())) data;
-    //data.
+    DataTypeFor<typename ToPrimitiveClass<ALPHA>::type> a0;
+    typename DataTypeFor<typename ToPrimitiveClass<ALPHA>::type>::Resolve<ToPrimitiveClass>::type a1;
+    typename DataTypeFor<typename ToPrimitiveClass<RepeatType<0, 1000, ALPHA> >::type>::template Resolve<ToPrimitiveClass>::type a2;
+    typename DataTypeFor<typename ToPrimitiveClass<repeat>::type>::template Resolve<ToPrimitiveClass>::type a3;
+    typename DataTypeFor<typename ToPrimitiveClass<RFC5322::Comment>::type>::template Resolve<ToPrimitiveClass>::type a4;
+    //decltype(Resolve(LF())) toto2;
+
+    DataCContent test;
+    DataComment test2;
+
+    //decltype(DefaultDataResolve(TypeBox<int>())) toto3;
+    //decltype(DefaultDataResolve(Resolve(CR()))) toto4;
+    //decltype(Resolve(CharVal<0x0D>())) toto5;
+    //decltype(DefaultDataResolve(Resolve(CharVal<0x0D>()))) toto6;
+    //DATATYPEFOR(CRLF) data;
+
+//    typename DataType<RFC5322::Comment>::type data2 = {};
+    __debugbreak();
+    return;
 }
 
 int main()

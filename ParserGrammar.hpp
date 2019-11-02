@@ -42,67 +42,6 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
     return inputChar >= CH1 && inputChar <= CH2;
 }
 
-template <typename BASE>
-class DefaultDataT : public std::remove_reference_t<BASE>
-{
-};
-
-template <>
-class DefaultDataT<nullptr_t>
-{
-public:
-    inline operator nullptr_t() const { return nullptr; }
-};
-
-#define PARSER_RULE_FORWARD(name) \
-    class name { public: \
-        static char const * Name() { return #name; } \
-    }; \
-    class IsConstant_##name IsConstant(name); \
-    class IsRawVariable_##name IsRawVariable(name); \
-    class DefaultData_##name DefaultData(name);
-
-#define PARSER_RULE_PARTIAL(name, ...) \
-    template <typename PARSER, typename TYPE> \
-    inline bool Parse(PARSER & parser, TYPE result, char const *, name) { return Parse(parser, result, #name, __VA_ARGS__); } \
-    template <typename PARSER, typename TYPE> \
-    inline bool Parse(PARSER & parser, TYPE result, name) { return Parse(parser, result, #name, __VA_ARGS__); } \
-    template <typename PARSER, typename TYPE> \
-    inline bool ParseExact(PARSER & parser, TYPE result, name) \
-    { \
-        if (Parse(parser, result, #name, __VA_ARGS__)) \
-        { \
-            if (parser.Ended()) \
-            { \
-                return true;\
-            } \
-            parser.Errors().clear(); \
-            std::swap(parser.Errors(), parser.LastRepeatErrors()); \
-        } \
-        return false; \
-    } \
-    class IsConstant_##name : public DefaultDataT<decltype(IsConstant(__VA_ARGS__))> {}; \
-    class IsRawVariable_##name : public DefaultDataT<decltype(IsRawVariable(__VA_ARGS__))> {}; \
-    class DefaultData_##name : public DefaultDataT<decltype(DefaultData(__VA_ARGS__))> {};
-
-#define PARSER_RULE_PARTIAL_CDATA(name, data, ...) \
-    PARSER_RULE_PARTIAL(name, __VA_ARGS__) \
-    template <typename PARSER> \
-    bool Parse(PARSER & parser, data * result) { return Parse(parser, result, name()); } \
-    template <typename PARSER> \
-    bool ParseExact(PARSER & parser, data * result) { return ParseExact(parser, result, name()); }
-
-#define PARSER_RULE(name, ...) \
-    PARSER_RULE_FORWARD(name) \
-    PARSER_RULE_PARTIAL(name, __VA_ARGS__)
-
-#define PARSER_RULE_CDATA(name, data, ...) \
-    PARSER_RULE_FORWARD(name) \
-    PARSER_RULE_PARTIAL_CDATA(name, data, __VA_ARGS__)
-
-#define PARSER_RULE_DATA(name, ...) \
-    PARSER_RULE_CDATA(name, name##Data, __VA_ARGS__)
-
 #define INDEX_NONE INT_MAX          // Used to define a primitive that has no specific member
 #define INDEX_THIS (INT_MAX-1)      // Use to define a primitive that parse current object instead of a member
 
@@ -125,9 +64,23 @@ public:
 
     static char const * Name() { return SEQ_TYPE::value == 0 ? "Sequence" : (SEQ_TYPE::value == 1 ? "Alternation" : "Union") ; }
 
-    inline std::tuple<PRIMITIVES...> const & Primitives() const { return primitives_; }
+    inline constexpr std::tuple<PRIMITIVES...> const & Primitives() const { return primitives_; }
     inline std::tuple<PRIMITIVES...> & Primitives() { return primitives_; }
 
+    inline constexpr auto const & Head() const { return std::get<0>(primitives_); }
+
+private:
+    template <size_t... INDICES>
+    inline constexpr auto const & Tail(std::index_sequence<INDICES...>) const
+    {
+        return std::make_tuple(std::get<INDICES + 1>(primitives_)...);
+    }
+
+public:
+    inline constexpr auto const & Tail() const
+    {
+        return Tail(std::make_index_sequence<(sizeof...(PRIMITIVES) - 1)>());
+    }
 };
 
 // Sequence try to parse consecutive primitives in the current object's consecutive members or in the current object if there is only one variable primitive
@@ -163,8 +116,8 @@ public:
     
     static char const * Name() { return "Repetition"; }
 
-    inline PRIMITIVE const & Primitive() const { return primitive_; }
-    inline PRIMITIVE & Primitive() { return primitive_; }
+    inline constexpr PRIMITIVE const & Elem() const { return primitive_; }
+    inline PRIMITIVE & Elem() { return primitive_; }
 };
 
 template <size_t MIN_COUNT = 0, size_t MAX_COUNT = SIZE_MAX, typename PRIMITIVE>
@@ -228,6 +181,208 @@ template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, E
 inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
 -> std::integral_constant<size_t, ((CONSTANT(IsConstant(std::declval<PRIMITIVE>())) ? 0 : 1)
                                   + CONSTANT(CountVariables(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >())))>;
+
+//
+//template <typename BASE>
+//class TypeBox
+//{
+//public:
+//};
+//
+//template <typename BASE, ENABLED_IF(std::is_null_pointer<BASE>::value == false)>
+//BASE UnboxType(TypeBox<BASE> const &);
+//
+////template <typename TYPE>
+////TYPE UnboxType(TYPE const &);
+////
+//nullptr_t UnboxType(TypeBox<nullptr_t> const &);
+//
+//#define DATATYPEFOR(PRIMITIVE_OR_RULE) typename std::remove_reference_t<decltype(UnboxType(Resolve(std::declval<PRIMITIVE_OR_RULE>())))>
+//
+//template <int... CODES>
+//TypeBox<nullptr_t> Resolve(CharVal<CODES...> const &);
+
+template <typename TYPE>
+class DataTypeFor;
+
+template <int... CODES>
+class DataTypeFor<CharVal<CODES...> >
+{
+public:
+    template <template <typename RULE> class TO_PRIMITIVE>
+    class Resolve
+    {
+    public:
+        using type = nullptr_t;
+    };
+};
+
+template <int... CODES>
+CharVal<CODES...> ToPrimitive(CharVal<CODES...> const &);
+
+//template <int CH1, int CH2>
+//TypeBox<SubstringPos> Resolve(CharRange<CH1, CH2> const &);
+
+template <int CH1, int CH2>
+class DataTypeFor<CharRange<CH1, CH2> >
+{
+public:
+    template <template <typename RULE> class TO_PRIMITIVE>
+    class Resolve
+    {
+    public:
+        using type = SubstringPos;
+    };
+};
+
+template <int CH1, int CH2>
+CharRange<CH1, CH2> ToPrimitive(CharRange<CH1, CH2> const &);
+
+namespace Impl
+{
+    template <typename ELEM_DATA_TYPE>
+    class RepeatDataType
+    {
+    public:
+        class Elem;
+        using type = std::vector<Elem>;
+        class Elem : public ELEM_DATA_TYPE
+        {
+        };
+    };
+
+    template <>
+    class RepeatDataType<nullptr_t>
+    {
+    public:
+        using type = nullptr_t;
+    };
+
+    template <>
+    class RepeatDataType<SubstringPos>
+    {
+    public:
+        using type = SubstringPos;
+    };
+};
+
+
+//template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
+//TypeBox<typename Impl::RepeatDataType<DATATYPEFOR(PRIMITIVE)>::type> Resolve(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const &);
+
+template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE_OR_RULE>
+class DataTypeFor<RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> >
+{
+public:
+    template <template <typename> class TO_PRIMITIVE>
+    class Resolve
+    {
+    public:
+        using type = typename Impl::RepeatDataType<
+            typename DataTypeFor<typename TO_PRIMITIVE<PRIMITIVE_OR_RULE>::type>::template Resolve<TO_PRIMITIVE>::type>::type;
+    };
+};
+
+template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE_OR_RULE>
+RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> ToPrimitive(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> const &);
+
+//template <typename PRIMITIVE>
+//inline auto Resolve(RepeatType<1, 1, PRIMITIVE> const & repetition) -> TypeBox<decltype(Resolve(repetition.Primitive()))>;
+
+template <typename PRIMITIVE_OR_RULE>
+class DataTypeFor<RepeatType<1, 1, PRIMITIVE_OR_RULE> >
+{
+public:
+    template <template <typename> class TO_PRIMITIVE>
+    class Resolve
+    {
+    public:
+        using type = typename DataTypeFor<typename TO_PRIMITIVE<PRIMITIVE_OR_RULE>::type>::template Resolve<TO_PRIMITIVE>::type;
+    };
+};
+
+namespace Impl
+{
+    SubstringPos Cat(SubstringPos const &, SubstringPos const &);
+
+    template <typename ANY>
+    ANY Cat(ANY const &, nullptr_t);
+
+    nullptr_t Cat(nullptr_t, nullptr_t);
+
+    template <typename ANY>
+    ANY Cat(nullptr_t, ANY const &);
+
+    template <typename TYPE1, typename... TYPES>
+    std::tuple<TYPE1, TYPES...> Cat(TYPE1 const &, std::tuple<TYPES...> const &);
+
+    template <typename... TYPES, typename TYPE2>
+    std::tuple<TYPES..., TYPE2> Cat(std::tuple<TYPES...> const &, TYPE2 const &);
+
+    template <typename TYPE1, typename TYPE2>
+    std::tuple<TYPE1, TYPE2> Cat(TYPE1 const &, TYPE2 const &);
+
+    template <template <typename> class TO_PRIMITIVE, typename... TYPES>
+    class SeqDataType;
+
+    template <template <typename> class TO_PRIMITIVE, typename TYPE1, typename... OTHER_TYPES>
+    class SeqDataType<TO_PRIMITIVE, TYPE1, OTHER_TYPES...>
+    {
+    public:
+        using type = decltype(Cat(
+            std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE1>::type>::template Resolve<TO_PRIMITIVE>::type>(),
+            std::declval<typename SeqDataType<TO_PRIMITIVE, OTHER_TYPES...>::type>()));
+    };
+    
+    template <template <typename> class TO_PRIMITIVE, typename TYPE1, typename TYPE2>
+    class SeqDataType<TO_PRIMITIVE, TYPE1, TYPE2>
+    {
+    public:
+        using type = decltype(Cat(
+            std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE1>::type>::template Resolve<TO_PRIMITIVE>::type>(),
+            std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE2>::type>::template Resolve<TO_PRIMITIVE>::type>()));
+    };
+
+    template <template <typename> class TO_PRIMITIVE, typename TYPE1>
+    class SeqDataType<TO_PRIMITIVE, TYPE1>
+    {
+    public:
+        //using type = DATATYPEFOR(TYPE1);
+        using type = typename TO_PRIMITIVE<TYPE1>::type;
+    };
+
+    template <typename TYPE>
+    class Detuplify
+    {
+    public:
+        using type = TYPE;
+    };
+
+    template <typename TYPE>
+    class Detuplify<std::tuple<TYPE> >
+    {
+    public:
+        using type = TYPE;
+    };
+}
+
+//template <typename SEQ_TYPE, typename... PRIMITIVES>
+//TypeBox<typename Impl::Detuplify<typename Impl::SeqDataType<PRIMITIVES...>::type>::type> Resolve(SequenceType<SEQ_TYPE, PRIMITIVES...> const &);
+//
+template <typename SEQ_TYPE, typename... PRIMITIVES>
+class DataTypeFor<SequenceType<SEQ_TYPE, PRIMITIVES...> >
+{
+public:
+    template <template <typename RULE> class TO_PRIMITIVE>
+    class Resolve
+    {
+    public:
+        using type = typename Impl::Detuplify<typename Impl::SeqDataType<TO_PRIMITIVE, PRIMITIVES...>::type>::type;
+    };
+};
+
+template <typename SEQ_TYPE, typename... PRIMITIVES>
+SequenceType<SEQ_TYPE, PRIMITIVES...> ToPrimitive(SequenceType<SEQ_TYPE, PRIMITIVES...> const &);
 
 template <int CODE>
 std::false_type IsRawVariable(CharVal<CODE> const & primitive);
@@ -473,7 +628,7 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, Repea
     for (; count < MAX_COUNT; ++count)
     {
         decltype(Impl::ElemTypeOrNull(elems)) elem = {};
-        if (Parse(parser, Impl::PtrOrNull(elem), what.Primitive().Name(), what.Primitive()))
+        if (Parse(parser, Impl::PtrOrNull(elem), what.Elem().Name(), what.Elem()))
         {
             if (false == IsEmpty(elem))
                 Impl::PushBackIfNotNull(elems, std::move(elem));
@@ -496,27 +651,96 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, Repea
 template <typename PARSER, typename ELEMS_PTR, typename PRIMITIVE>
 inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, RepeatType<0, 1, PRIMITIVE> const & what)
 {
-    return Parse(parser, elems, what.Primitive().Name(), what.Primitive()) || true;
+    return Parse(parser, elems, what.Elem().Name(), what.Elem()) || true;
 }
 
-template <typename PRIMITIVE, ENABLED_IF(CONSTANT(IsConstant(std::declval<PRIMITIVE>())))>
-nullptr_t DefaultData(PRIMITIVE const & primitive);
+// Some compilers need that enable_if dependant on function signature are used as return type
+template <typename PRIMITIVE>
+ENABLED_IF_RET(CONSTANT(IsConstant(std::declval<PRIMITIVE>())), nullptr_t) DefaultData(PRIMITIVE const & primitive);
 
-template <typename PRIMITIVE, ENABLED_IF(CONSTANT(IsRawVariable(std::declval<PRIMITIVE>())))>
-SubstringPos DefaultData(PRIMITIVE const & primitive);
+template <typename PRIMITIVE>
+ENABLED_IF_RET(CONSTANT(IsRawVariable(std::declval<PRIMITIVE>())), SubstringPos) DefaultData(PRIMITIVE const & primitive);
 
 template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
 auto DefaultData(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & repetition)
--> std::vector<decltype(DefaultData(repetition.Primitive()))>;
+-> std::vector<decltype(DefaultData(repetition.Elem()))>;
 
 template <typename SEQ_TYPE, typename PRIMITIVE>
 auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence)
--> decltype(DefaultData(std::get<0>(sequence)));
+-> decltype(std::make_tuple(DefaultData(sequence.Head())));
 
-template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES,
-    ENABLED_IF((0 < sizeof...(OTHER_PRIMITIVES))
-        && CONSTANT(IsStructured(std::declval<SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> >())))>
+template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(0 < sizeof...(OTHER_PRIMITIVES))>
 auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
--> decltype(std::tuple_cat(
-    std::make_tuple(DefaultData(std::declval<PRIMITIVE>())),
-    DefaultData(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >())));
+-> ENABLED_IF_RET((false == CONSTANT(IsConstant(std::declval<PRIMITIVE>()))) && CONSTANT(IsStructured(std::declval<SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> >())),
+    decltype(std::tuple_cat(
+    std::make_tuple(DefaultData(std::declval<PRIMITIVE>())), DefaultData(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >()))));
+
+template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(0 < sizeof...(OTHER_PRIMITIVES))>
+auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+-> ENABLED_IF_RET(CONSTANT(IsConstant(std::declval<PRIMITIVE>())) && CONSTANT(IsStructured(std::declval<SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> >())),
+    decltype(DefaultData(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >())));
+
+template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(0 < sizeof...(OTHER_PRIMITIVES))>
+auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+-> ENABLED_IF_RET(CONSTANT(IsConstant(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >())) && CONSTANT(IsStructured(std::declval<SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> >())),
+    decltype(DefaultData(std::declval<PRIMITIVE>())));
+
+#define DefaultDataTypeOf(...) decltype(DefaultData(__VA_ARGS__))
+
+
+#define PARSER_RULE_FORWARD(name) \
+    class name { public: \
+        static char const * Name() { return #name; } \
+    }; \
+    class IsConstant_##name IsConstant(name); \
+    //class Resolve_##name Resolve(name const &);
+
+
+    //class IsRawVariable_##name IsRawVariable(name); \
+    //class DefaultData_##name DefaultData(name);
+
+#define PARSER_RULE_PARTIAL(name, ...) \
+    template <typename PARSER, typename TYPE> \
+    inline bool Parse(PARSER & parser, TYPE result, char const *, name) { return Parse(parser, result, #name, __VA_ARGS__); } \
+    template <typename PARSER, typename TYPE> \
+    inline bool Parse(PARSER & parser, TYPE result, name) { return Parse(parser, result, #name, __VA_ARGS__); } \
+    template <typename PARSER, typename TYPE> \
+    inline bool ParseExact(PARSER & parser, TYPE result, name) \
+    { \
+        if (Parse(parser, result, #name, __VA_ARGS__)) \
+        { \
+            if (parser.Ended()) \
+            { \
+                return true;\
+            } \
+            parser.Errors().clear(); \
+            std::swap(parser.Errors(), parser.LastRepeatErrors()); \
+        } \
+        return false; \
+    } \
+    class IsConstant_##name : public decltype(IsConstant(__VA_ARGS__)) {}; \
+    inline auto ToPrimitive(name) { return __VA_ARGS__; }
+    //class Resolve_##name : public decltype(Resolve(__VA_ARGS__)) { };
+
+
+    //class IsRawVariable_##name : public decltype(IsRawVariable(__VA_ARGS__)) {}; \
+    //class DefaultData_##name : public DefaultDataT<decltype(DefaultData(__VA_ARGS__))> {};
+
+#define PARSER_RULE_PARTIAL_CDATA(name, data, ...) \
+    PARSER_RULE_PARTIAL(name, __VA_ARGS__) \
+    template <typename PARSER> \
+    bool Parse(PARSER & parser, data * result) { return Parse(parser, result, name()); } \
+    template <typename PARSER> \
+    bool ParseExact(PARSER & parser, data * result) { return ParseExact(parser, result, name()); }
+
+#define PARSER_RULE(name, ...) \
+    PARSER_RULE_FORWARD(name) \
+    PARSER_RULE_PARTIAL(name, __VA_ARGS__)
+
+#define PARSER_RULE_CDATA(name, data, ...) \
+    PARSER_RULE_FORWARD(name) \
+    PARSER_RULE_PARTIAL_CDATA(name, data, __VA_ARGS__)
+
+#define PARSER_RULE_DATA(name, ...) \
+    PARSER_RULE_CDATA(name, name##Data, __VA_ARGS__)
+
