@@ -7,7 +7,7 @@
 #pragma once
 
 #include "ParserCore.hpp"
-#include "ParserRFC5322Data.hpp"
+#include "ParserRFC5322Data.inl"
 
 namespace RFC5322
 {

@@ -15,32 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ParserBase.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ParserRFC5322Data.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ParserRFC5322Rules.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ParserCore.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ParserRFC5234.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ParserGenerator.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ParserIO.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ParserGrammar.hpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="Parser.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

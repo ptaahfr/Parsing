@@ -15,9 +15,8 @@
 #include <algorithm>
 
 #ifndef PARSER_TEST_CORE_ONLY
-#include "ParserRFC5322Data.hpp"
-#include "ParserRFC5322Rules.hpp"
-#include "ParserRFC5234.hpp"
+#include "rfc5322/ParserRFC5322Rules.hpp"
+#include "rfc5234/RFC5324Rules.hpp"
 #endif
 
 #include <iostream>
@@ -60,7 +59,7 @@ void TestRFC5234()
 )ABNF");
 }
 
-#include "ParserGenerator.hpp"
+#include "rfc5234/ABNFParserGenerator.hpp"
 
 void ParseABNF()
 {
@@ -356,15 +355,15 @@ void Test_Parser_Core()
     using namespace RFC5234ABNF;
 //    using namespace RFC5322;
 
-    DataTypeFor<typename ToPrimitiveClass<ALPHA>::type> a0;
-    typename DataTypeFor<typename ToPrimitiveClass<ALPHA>::type>::Resolve<ToPrimitiveClass>::type a1;
-    typename DataTypeFor<typename ToPrimitiveClass<RepeatType<0, 1000, ALPHA> >::type>::template Resolve<ToPrimitiveClass>::type a2;
-    typename DataTypeFor<typename ToPrimitiveClass<repeat>::type>::template Resolve<ToPrimitiveClass>::type a3;
-    typename DataTypeFor<typename ToPrimitiveClass<RFC5322::Comment>::type>::template Resolve<ToPrimitiveClass>::type a4;
+    //DataTypeFor<typename ToPrimitiveClass<ALPHA>::type> a0;
+    //typename DataTypeFor<typename ToPrimitiveClass<ALPHA>::type>::Resolve<ToPrimitiveClass>::type a1;
+    //typename DataTypeFor<typename ToPrimitiveClass<RepeatType<0, 1000, ALPHA> >::type>::template Resolve<ToPrimitiveClass>::type a2;
+    //typename DataTypeFor<typename ToPrimitiveClass<repeat>::type>::template Resolve<ToPrimitiveClass>::type a3;
+    //typename DataTypeFor<typename ToPrimitiveClass<RFC5322::Comment>::type>::template Resolve<ToPrimitiveClass>::type a4;
     //decltype(Resolve(LF())) toto2;
 
-    DataCContent test;
-    DataComment test2;
+    //DataCContent test;
+    //DataComment test2;
 
     //decltype(DefaultDataResolve(TypeBox<int>())) toto3;
     //decltype(DefaultDataResolve(Resolve(CR()))) toto4;
@@ -373,7 +372,7 @@ void Test_Parser_Core()
     //DATATYPEFOR(CRLF) data;
 
 //    typename DataType<RFC5322::Comment>::type data2 = {};
-    __debugbreak();
+//    __debugbreak();
     return;
 }
 
@@ -387,34 +386,6 @@ int main()
 
     ParseABNF();
 
-    test_address("troll@bitch.com, arobar     d <sigma@addr.net>, sir john snow <user.name+tag+sorting@example.com(comment)>");
-    test_address("arobar     d <sigma@addr.net>");
-    test_address("troll@bitch.com");
-    test_address("display <simple@example.com>");
-
-    test_address("A@b@c@example.com");
-
-    test_address("simple@example.com");
-    test_address("simple(comm1)@(comm2)example.com");
-    test_address("very.common@example.com");
-    test_address("disposable.style.email.with+symbol@example.com");
-    test_address("other.email-with-hyphen@example.com");
-    test_address("fully-qualified-domain@example.com");
-    test_address("user.name+tag+sorting@example.com");
-    test_address("x@example.com");
-    test_address("example-indeed@strange-example.com");
-    test_address("admin@mailserver1");
-    test_address("example@s.example");
-    test_address("\" \"@example.org");
-    test_address("\"john..doe\"@example.org");
-    test_address("\"john..doe\"@example.org, friends: rantanplan@lucky, titi@disney, dingo@disney;");
-
-    test_address("Abc.example.com");
-    test_address("a\"b(c)d,e:f;g<h>i[j\\k]l@example.com");
-    test_address("just\"not\"right@example.com");
-    test_address("this is\"not\\allowed@example.com");
-    test_address("this\\ still\\\"not\\\\allowed@example.com");
-    test_address("1234567890123456789012345678901234567890123456789012345678901234+x@example.com");
 #endif
 
     return 0;

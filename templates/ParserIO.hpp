@@ -238,13 +238,14 @@ public:
         ParserIO & parent_;
         size_t inputPos_;
         size_t outputPos_;
-        size_t errorsSize_;
         char const * ruleName_;
+        std::list<ErrorFunctionType> savedErrors_;
     public:
         inline SavedIOState(ParserIO & parent, nullptr_t, char const * ruleName)
             : parent_(parent), inputPos_(parent.Input().Pos()), outputPos_(parent.Output().Pos()),
-            errorsSize_(parent.Errors().size()), ruleName_(ruleName)
+            ruleName_(ruleName)
         {
+            std::swap(savedErrors_, parent.Errors());
         }
 
         template <bool WHOLE>
@@ -260,6 +261,7 @@ public:
             {
                 std::list<ErrorFunctionType> childErrors;
                 std::swap(parent_.Errors(), childErrors);
+
                 parent_.Errors().push_back(
                     [ruleName = ruleName_, errors = std::move(childErrors), firstInputPos = inputPos_, lastInputPos = parent_.Input().Pos()]
                     (std::ostream & cerr, std::string const & indent)
@@ -275,10 +277,8 @@ public:
                 });
                 Reset<false>();
             }
-            else
-            {
-                parent_.Errors().resize(errorsSize_);
-            }
+
+            parent_.Errors().insert(parent_.Errors().begin(), savedErrors_.begin(), savedErrors_.end());
         }
 
         inline bool Success()

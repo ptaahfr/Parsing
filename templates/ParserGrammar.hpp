@@ -479,8 +479,8 @@ inline bool Parse(PARSER & parser, nullptr_t, char const * ruleName, CharRange<C
 
 namespace Impl
 {
-    template <size_t INDEX, typename TYPE_PTR, ENABLED_IF(INDEX != INDEX_THIS && INDEX != INDEX_NONE)>
-    inline auto FieldNotNull(TYPE_PTR type) -> decltype(&std::get<INDEX>(*type))
+    template <size_t INDEX, typename TUPLE_TYPE, ENABLED_IF(INDEX != INDEX_THIS && INDEX != INDEX_NONE), ENABLED_IF_TUPLISH(TUPLE_TYPE)>
+    inline auto FieldNotNull(TUPLE_TYPE * type) -> decltype(&std::get<INDEX>(*type))
     {
         if (type != nullptr)
         {
@@ -654,12 +654,15 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, Repea
     return Parse(parser, elems, what.Elem().Name(), what.Elem()) || true;
 }
 
+#if 0
+
 // Some compilers need that enable_if dependant on function signature are used as return type
 template <typename PRIMITIVE>
 ENABLED_IF_RET(CONSTANT(IsConstant(std::declval<PRIMITIVE>())), nullptr_t) DefaultData(PRIMITIVE const & primitive);
 
 template <typename PRIMITIVE>
 ENABLED_IF_RET(CONSTANT(IsRawVariable(std::declval<PRIMITIVE>())), SubstringPos) DefaultData(PRIMITIVE const & primitive);
+
 
 template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
 auto DefaultData(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & repetition)
@@ -687,6 +690,7 @@ auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & 
 
 #define DefaultDataTypeOf(...) decltype(DefaultData(__VA_ARGS__))
 
+#endif
 
 #define PARSER_RULE_FORWARD(name) \
     class name { public: \

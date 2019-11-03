@@ -16,6 +16,12 @@ enum TextWithCommFields
     TextWithCommFields_CommentAfter
 };
 
+//NAMEDTUPLE_BEGIN(TextWithCommData)
+//    NAMEDTUPLE_ITEM(SubstringPos, CommentBefore, )
+//    NAMEDTUPLE_ITEM(SubstringPos, Content, )
+//    NAMEDTUPLE_ITEM(SubstringPos, CommentAfter, )
+//NAMEDTUPLE_END(TextWithCommData)
+
 using MultiTextWithCommData = std::vector<TextWithCommData>;
 
 using AddrSpecData = std::tuple<TextWithCommData, TextWithCommData>; // LocalPart, DomainPart

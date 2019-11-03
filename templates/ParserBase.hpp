@@ -20,6 +20,20 @@
 #define CONSTANT_F(funcname, ...) std::remove_reference_t<decltype(funcname(std::declval<__VA_ARGS__>()))>::value
 #define TYPE_F(funcname, ...) typename std::remove_reference_t<decltype(funcname(std::declval<__VA_ARGS__>()))>
 
+#include "NamedTuple.hpp"
+
+template <typename TYPE>
+class IsTuplish : public std::integral_constant<bool, false> { };
+
+template <typename... ARGS>
+class IsTuplish<std::tuple<ARGS...> > : public std::integral_constant<bool, true> { };
+
+template <typename LAST_MEMBER>
+class IsTuplish<NamedTuple::NamedTuple<LAST_MEMBER> > : public std::integral_constant<bool, true> { };
+
+#define ENABLED_IF_TUPLISH(which) std::enable_if_t<IsTuplish<which>::value, void *> = nullptr
+#define ENABLED_IF_TUPLISH_DEF(which) std::enable_if_t<IsTuplish<which>::value, void *> 
+
 using MaxCharType = int;
 
 using SubstringPos = std::pair<size_t, size_t>;
@@ -45,19 +59,19 @@ inline bool IsEmpty(nullptr_t)
 template <typename ELEM>
 inline bool IsEmpty(std::vector<ELEM> const & arr);
 
-template <size_t OFFSET, typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> const & tuple);
+template <size_t OFFSET, typename TUPLE_TYPE, ENABLED_IF_TUPLISH(TUPLE_TYPE)>
+inline bool IsEmpty(TUPLE_TYPE const & tuple);
 
-template <typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> const & tuple)
+template <typename TUPLE_TYPE, ENABLED_IF_TUPLISH(TUPLE_TYPE)>
+inline bool IsEmpty(TUPLE_TYPE const & tuple)
 {
     return IsEmpty<0>(tuple);
 }
 
-template <size_t OFFSET, typename... ARGS>
-inline bool IsEmpty(std::tuple<ARGS...> const & tuple)
+template <size_t OFFSET, typename TUPLE_TYPE, ENABLED_IF_TUPLISH_DEF(TUPLE_TYPE)>
+inline bool IsEmpty(TUPLE_TYPE const & tuple)
 {
-    enum { NEXT_OFFSET = __min(OFFSET + 1, sizeof...(ARGS) - 1) };
+    enum { NEXT_OFFSET = __min(OFFSET + 1, std::tuple_size<TUPLE_TYPE>::value - 1) };
     if (false == IsEmpty(std::get<OFFSET>(tuple)))
         return false;
     if (NEXT_OFFSET > OFFSET)
