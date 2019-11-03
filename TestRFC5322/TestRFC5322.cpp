@@ -7,7 +7,7 @@
 #include <iostream>
 
 #include "ParserIO.hpp"
-#include "rfc5322/ParserRFC5322Rules.hpp"
+#include "rfc5322/RFC5322Rules.hpp"
 
 void test_address(std::string const & addr)
 {
@@ -27,36 +27,36 @@ void test_address(std::string const & addr)
             auto displayAddress = [&](AddrSpecData const & addrSpec, auto indent)
             {
                 std::cout << indent << "     Adress: " << std::endl;
-                std::cout << indent << "       Local-Part: '" << ToString(outBuffer, false, std::get<AddrSpecFields_LocalPart>(addrSpec)) << "'" << std::endl;
-                std::cout << indent << "       Domain-Part: '" << ToString(outBuffer, false, std::get<AddrSpecFields_DomainPart>(addrSpec)) << "'" << std::endl;
+                std::cout << indent << "       Local-Part: '" << ToString(outBuffer, false, addrSpec.LocalPart) << "'" << std::endl;
+                std::cout << indent << "       Domain-Part: '" << ToString(outBuffer, false, addrSpec.DomainPart) << "'" << std::endl;
             };
 
             auto displayMailBox = [&](MailboxData const & mailbox, auto indent)
             {
                 std::cout << indent << "   Mailbox:" << std::endl;
-                if (IsEmpty(std::get<MailboxFields_AddrSpec>(mailbox)))
+                if (IsEmpty(mailbox.AddrSpec))
                 {
-                    auto const & nameAddrData = std::get<MailboxFields_NameAddr>(mailbox);
-                    std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, std::get<NameAddrFields_DisplayName>(nameAddrData)) << std::endl;
-                    displayAddress(std::get<AngleAddrFields_Content>(std::get<NameAddrFields_Address>(nameAddrData)), indent);
+                    auto const & nameAddrData = mailbox.NameAddr;
+                    std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, nameAddrData.DisplayName) << std::endl;
+                    displayAddress(nameAddrData.Address.Content, indent);
                 }
                 else
                 {
-                    displayAddress(std::get<MailboxFields_AddrSpec>(mailbox), indent);
+                    displayAddress(mailbox.AddrSpec, indent);
                 }
             };
 
-            if (false == IsEmpty(std::get<AddressFields_Mailbox>(address)))
+            if (false == IsEmpty(address.Mailbox))
             {
-                displayMailBox(std::get<AddressFields_Mailbox>(address), "");
+                displayMailBox(address.Mailbox, "");
             }
             else
             {
-                auto const & group = std::get<AddressFields_Group>(address);
+                auto const & group = address.Group;
                 std::cout << "   Group:" << std::endl;
-                std::cout << "     Display Name: '" << ToString(outBuffer, true, std::get<GroupFields_DisplayName>(group)) << "'" << std::endl;
+                std::cout << "     Display Name: '" << ToString(outBuffer, true, group.DisplayName) << "'" << std::endl;
                 std::cout << "     Members:" << std::endl;
-                for (auto const & groupAddr : std::get<GroupListFields_Mailboxes>(std::get<GroupFields_GroupList>(group)))
+                for (auto const & groupAddr : group.GroupList.Mailboxes)
                 {
                     displayMailBox(groupAddr, "   ");
                 }

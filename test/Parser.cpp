@@ -15,7 +15,7 @@
 #include <algorithm>
 
 #ifndef PARSER_TEST_CORE_ONLY
-#include "rfc5322/ParserRFC5322Rules.hpp"
+#include "rfc5322/RFC5322Rules.hpp"
 #include "rfc5234/RFC5324Rules.hpp"
 #endif
 
@@ -190,8 +190,8 @@ void test_address(std::string const & addr)
             auto displayAddress = [&](AddrSpecData const & addrSpec, auto indent)
             {
                 std::cout << indent << "     Adress: " << std::endl;
-                std::cout << indent << "       Local-Part: '" << ToString(outBuffer, false, std::get<AddrSpecFields_LocalPart>(addrSpec)) << "'" << std::endl;
-                std::cout << indent << "       Domain-Part: '" << ToString(outBuffer, false, std::get<AddrSpecFields_DomainPart>(addrSpec)) << "'" << std::endl;
+                std::cout << indent << "       Local-Part: '" << ToString(outBuffer, false, addrSpec.LocalPart) << "'" << std::endl;
+                std::cout << indent << "       Domain-Part: '" << ToString(outBuffer, false, addrSpec.DomainPart) << "'" << std::endl;
             };
 
             auto displayMailBox = [&](MailboxData const & mailbox, auto indent)
@@ -199,9 +199,9 @@ void test_address(std::string const & addr)
                 std::cout << indent << "   Mailbox:" << std::endl;
                 if (IsEmpty(std::get<MailboxFields_AddrSpec>(mailbox)))
                 {
-                    auto const & nameAddrData = std::get<MailboxFields_NameAddr>(mailbox);
-                    std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, std::get<NameAddrFields_DisplayName>(nameAddrData)) << std::endl;
-                    displayAddress(std::get<AngleAddrFields_Content>(std::get<NameAddrFields_Address>(nameAddrData)), indent);
+                    auto const & nameAddrData = mailbox.NameAddr;
+                    std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, nameAddrData.DisplayName) << std::endl;
+                    displayAddress(nameAddrData.Address.Content, indent);
                 }
                 else
                 {

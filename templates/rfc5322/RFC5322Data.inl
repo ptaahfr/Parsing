@@ -8,76 +8,54 @@
 
 #include "ParserBase.hpp"
 
-using TextWithCommData = std::tuple<SubstringPos, SubstringPos, SubstringPos>; // CommentBefore, Content, CommentAfter
-enum TextWithCommFields
-{
-    TextWithCommFields_CommentBefore,
-    TextWithCommFields_Content,
-    TextWithCommFields_CommentAfter
-};
-
-//NAMEDTUPLE_BEGIN(TextWithCommData)
-//    NAMEDTUPLE_ITEM(SubstringPos, CommentBefore, )
-//    NAMEDTUPLE_ITEM(SubstringPos, Content, )
-//    NAMEDTUPLE_ITEM(SubstringPos, CommentAfter, )
-//NAMEDTUPLE_END(TextWithCommData)
+NAMEDTUPLE_BEGIN(TextWithCommData)
+    NAMEDTUPLE_ITEM(SubstringPos, CommentBefore, )
+    NAMEDTUPLE_ITEM(SubstringPos, Content, )
+    NAMEDTUPLE_ITEM(SubstringPos, CommentAfter, )
+NAMEDTUPLE_END(TextWithCommData)
 
 using MultiTextWithCommData = std::vector<TextWithCommData>;
 
-using AddrSpecData = std::tuple<TextWithCommData, TextWithCommData>; // LocalPart, DomainPart
-enum AddrSpecFields
-{
-    AddrSpecFields_LocalPart,
-    AddrSpecFields_DomainPart,
-};
+NAMEDTUPLE_BEGIN(AddrSpecData)
+    NAMEDTUPLE_ITEM(TextWithCommData, LocalPart, )
+    NAMEDTUPLE_ITEM(TextWithCommData, DomainPart, )
+NAMEDTUPLE_END(AddrSpecData)
 
-using AngleAddrData = std::tuple<SubstringPos, AddrSpecData, SubstringPos>; // CommentBefore, Content, CommentAfter
-enum AngleAddrFields
-{
-    AngleAddrFields_CommentBefore,
-    AngleAddrFields_Content,
-    AngleAddrFields_CommentAfter
-};
+NAMEDTUPLE_BEGIN(AngleAddrData)
+    NAMEDTUPLE_ITEM(SubstringPos, CommentBefore, )
+    NAMEDTUPLE_ITEM(AddrSpecData, Content, )
+    NAMEDTUPLE_ITEM(SubstringPos, CommentAfter, )
+NAMEDTUPLE_END(AngleAddrData)
 
-using NameAddrData = std::tuple<MultiTextWithCommData, AngleAddrData>; // DisplayName, Address
-enum NameAddrFields
-{
-    NameAddrFields_DisplayName,
-    NameAddrFields_Address,
-};
+NAMEDTUPLE_BEGIN(NameAddrData)
+    NAMEDTUPLE_ITEM(MultiTextWithCommData, DisplayName, )
+    NAMEDTUPLE_ITEM(AngleAddrData, Address, )
+NAMEDTUPLE_END(NameAddrData)
 
-using MailboxData = std::tuple<NameAddrData, AddrSpecData>; // NameAddr, AddrSpec
-enum MailboxFields
-{
-    MailboxFields_NameAddr,
-    MailboxFields_AddrSpec,
-};
+NAMEDTUPLE_BEGIN(MailboxData)
+    NAMEDTUPLE_ITEM(NameAddrData, NameAddr, )
+    NAMEDTUPLE_ITEM(AddrSpecData, AddrSpec, )
+NAMEDTUPLE_END(MailboxData)
 
 using MailboxListData = std::vector<MailboxData>;
 
-using GroupListData = std::tuple<MailboxListData, SubstringPos>; // Mailboxes, Comment
-enum GroupListFields
-{
-    GroupListFields_Mailboxes,
-    GroupListFields_Comment
-};
+NAMEDTUPLE_BEGIN(GroupListData)
+    NAMEDTUPLE_ITEM(MailboxListData, Mailboxes, )
+    NAMEDTUPLE_ITEM(SubstringPos, Comment, )
+NAMEDTUPLE_END(GroupListData)
 
-using GroupData = std::tuple<MultiTextWithCommData, GroupListData, SubstringPos>; // DisplayName, GroupList, Comment
-enum GroupFields
-{
-    GroupFields_DisplayName,
-    GroupFields_GroupList,
-    GroupFields_Comment
-};
+NAMEDTUPLE_BEGIN(GroupData)
+    NAMEDTUPLE_ITEM(MultiTextWithCommData, DisplayName, )
+    NAMEDTUPLE_ITEM(GroupListData, GroupList, )
+    NAMEDTUPLE_ITEM(SubstringPos, Comment, )
+NAMEDTUPLE_END(GroupData)
 
-using AddressData = std::tuple<MailboxData, GroupData>;
-enum AddressFields
-{
-    AddressFields_Mailbox,
-    AddressFields_Group
-};
+NAMEDTUPLE_BEGIN(AddressData)
+    NAMEDTUPLE_ITEM(MailboxData, Mailbox, )
+    NAMEDTUPLE_ITEM(GroupData, Group, )
+NAMEDTUPLE_END(AddressData)
+
 using AddressListData = std::vector<AddressData>;
-
 
 template <typename CHAR_TYPE>
 std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, bool withComments, TextWithCommData const & text)
@@ -86,11 +64,11 @@ std::basic_string<CHAR_TYPE> ToString(std::vector<CHAR_TYPE> const & buffer, boo
 
     if (withComments)
     {
-        result += ToString(buffer, SubstringPos(std::get<TextWithCommFields_CommentBefore>(text).first, std::get<TextWithCommFields_CommentAfter>(text).second));
+        result += ToString(buffer, SubstringPos(text.CommentBefore.first, text.CommentAfter.second));
     }
     else
     {
-        result += ToString(buffer, std::get<TextWithCommFields_Content>(text));
+        result += ToString(buffer, text.Content);
     }
 
     return result;
