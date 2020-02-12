@@ -59,7 +59,7 @@ namespace name##Members                                             \
     public:                                                         \
         enum { Count = 0 };                                         \
         template <size_t INDEX>                                     \
-        inline nullptr_t Get(std::integral_constant<size_t, INDEX>) const            \
+        inline std::nullptr_t Get(std::integral_constant<size_t, INDEX>) const            \
         {                                                                            \
             return nullptr;                                                          \
         }                                                                            \
@@ -116,7 +116,7 @@ namespace name##Members                                                     \
     public:                                                                 \
         enum { Count = 0 };                                                 \
         template <size_t INDEX>                                             \
-        inline nullptr_t Get(std::integral_constant<size_t, INDEX>) const            \
+        inline std::nullptr_t Get(std::integral_constant<size_t, INDEX>) const            \
         {                                                                            \
             return nullptr;                                                          \
         }                                                                            \
@@ -181,7 +181,7 @@ namespace name##Members                                                         
     public:                                                                          \
         enum { Count = 0 };                                                          \
         template <size_t INDEX>                                                      \
-        inline nullptr_t Get(std::integral_constant<size_t, INDEX>) const            \
+        inline std::nullptr_t Get(std::integral_constant<size_t, INDEX>) const            \
         {                                                                            \
             return nullptr;                                                          \
         }                                                                            \

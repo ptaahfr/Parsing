@@ -42,15 +42,12 @@ inline bool Match(int inputChar, CharRange<CH1, CH2>)
     return inputChar >= CH1 && inputChar <= CH2;
 }
 
-#define INDEX_NONE INT_MAX          // Used to define a primitive that has no specific member
-#define INDEX_THIS (INT_MAX-1)      // Use to define a primitive that parse current object instead of a member
+#define INDEX_NONE std::numeric_limits<size_t>::max()          // Used to define a primitive that has no specific member
+#define INDEX_THIS (std::numeric_limits<size_t>::max()-1)      // Use to define a primitive that parse current object instead of a member
 
-template <size_t IDX>
-class Idx {};
-
-using SeqTypeSeq = std::integral_constant<size_t, 0>;
-using SeqTypeAlt = std::integral_constant<size_t, 1>;
-using SeqTypeUnion = std::integral_constant<size_t, 2>;
+using SeqTypeSeq = Idx<0>;
+using SeqTypeAlt = Idx<1>;
+using SeqTypeUnion = Idx<2>;
 
 template <typename SEQ_TYPE, typename... PRIMITIVES>
 class SequenceType
@@ -152,35 +149,95 @@ inline auto HeadTail(PRIMITIVE primitiveHead, OTHER_PRIMITIVES... primitiveTail)
     return Sequence(Idx<INDEX_THIS>(), Repeat<1, 1>(primitiveHead), Idx<INDEX_THIS>(), Repeat(primitiveTail...));
 }
 
+//template <typename PRIMITIVE>
+//inline std::false_type IsConstant(PRIMITIVE const & primitive);
+//
+//template <int CODE>
+//inline std::true_type IsConstant(CharVal<CODE> const & primitive);
+//
+//template <int CH1, int CH2>
+//inline std::bool_constant<(CH2 <= CH1)> IsConstant(CharRange<CH1, CH2> const & primitive);
+//
+//template <typename SEQ_TYPE, typename PRIMITIVE>
+//inline auto IsConstant(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
+//
+//template <typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(sizeof...(OTHER_PRIMITIVES) > 0)>
+//inline auto IsConstant(SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+//-> std::bool_constant<CONSTANT(IsConstant(std::declval<PRIMITIVE>()))
+//                   && CONSTANT(IsConstant(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>;
+//
+//template <size_t FIXED_COUNT, typename PRIMITIVE>
+//inline auto IsConstant(RepeatType<FIXED_COUNT, FIXED_COUNT, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
+//
+//template <typename SEQ_TYPE, typename PRIMITIVE>
+//inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence)
+//-> Idx<(CONSTANT(IsConstant(std::declval<PRIMITIVE>())) ? 0 : 1)>;
+//
+//template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(sizeof...(OTHER_PRIMITIVES) > 0)>
+//inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+//-> Idx<((CONSTANT(IsConstant(std::declval<PRIMITIVE>())) ? 0 : 1)
+//     + CONSTANT(CountVariables(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >())))>;
+//
 
-template <typename PRIMITIVE>
-inline std::false_type IsConstant(PRIMITIVE const & primitive);
+namespace Impl
+{
+    template <typename TYPE>
+    class Constantness : public std::false_type
+    {
+    };
 
-template <int CODE>
-inline std::true_type IsConstant(CharVal<CODE> const & primitive);
+    template <int CODE>
+    class Constantness<CharVal<CODE> > : public std::true_type
+    {
+    };
 
-template <int CH1, int CH2>
-inline auto IsConstant(CharRange<CH1, CH2> const & primitive) -> decltype(std::bool_constant<(CH2 <= CH1)>());
+    template <int CH1, int CH2>
+    class Constantness<CharRange<CH1, CH2> > : public Bool<(CH2 <= CH1)>
+    {
+    };
 
-template <typename SEQ_TYPE, typename PRIMITIVE>
-inline auto IsConstant(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
+    template <typename SEQ_TYPE, typename PRIMITIVE>
+    class Constantness<SequenceType<SEQ_TYPE, PRIMITIVE> > : public Constantness<PRIMITIVE>
+    {
+    };
 
-template <typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(sizeof...(OTHER_PRIMITIVES) > 0)>
-inline auto IsConstant(SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
--> std::bool_constant<CONSTANT(IsConstant(std::declval<PRIMITIVE>()))
-                   && CONSTANT(IsConstant(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>;
+    template <typename PRIMITIVE1, typename PRIMITIVE2, typename... OTHER_PRIMITIVES>
+    class Constantness<SequenceType<SeqTypeSeq, PRIMITIVE1, PRIMITIVE2, OTHER_PRIMITIVES...> >
+        : public Bool<Constantness<PRIMITIVE1>::value && Constantness<SequenceType<SeqTypeSeq, PRIMITIVE2, OTHER_PRIMITIVES...> >::value>
+    {
+    };
 
-template <size_t FIXED_COUNT, typename PRIMITIVE>
-inline auto IsConstant(RepeatType<FIXED_COUNT, FIXED_COUNT, PRIMITIVE> const & sequence) -> decltype(IsConstant(std::declval<PRIMITIVE>()));
+    template <size_t FIXED_COUNT, typename PRIMITIVE>
+    class Constantness<RepeatType<FIXED_COUNT, FIXED_COUNT, PRIMITIVE> >
+        : public Constantness<PRIMITIVE>
+    {
+    };
 
-template <typename SEQ_TYPE, typename PRIMITIVE>
-inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence)
--> std::integral_constant<size_t, (CONSTANT(IsConstant(std::declval<PRIMITIVE>())) ? 0 : 1)>;
+    template <typename PRIMITIVE>
+    class VariablesCount : public Idx<Constantness<PRIMITIVE>::value ? 0 : 1>
+    {
 
-template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(sizeof...(OTHER_PRIMITIVES) > 0)>
-inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
--> std::integral_constant<size_t, ((CONSTANT(IsConstant(std::declval<PRIMITIVE>())) ? 0 : 1)
-                                  + CONSTANT(CountVariables(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >())))>;
+    };
+
+    template <typename SEQ_TYPE, typename PRIMITIVE>
+    class VariablesCount<SequenceType<SEQ_TYPE, PRIMITIVE> > : public Idx<Constantness<PRIMITIVE>::value ? 0 : 1>
+    {
+
+    };
+
+    template <typename SEQ_TYPE, typename PRIMITIVE1, typename PRIMITIVE2, typename... OTHER_PRIMITIVES>
+    class VariablesCount<SequenceType<SEQ_TYPE, PRIMITIVE1, PRIMITIVE2, OTHER_PRIMITIVES...> >
+    : public Idx<VariablesCount<SequenceType<SEQ_TYPE, PRIMITIVE1> >::value + VariablesCount<SequenceType<SEQ_TYPE, PRIMITIVE2, OTHER_PRIMITIVES...> >::value>
+    {
+
+    };
+}
+
+template <typename TYPE>
+Impl::Constantness<TYPE> IsConstant(TYPE);
+
+template <typename TYPE>
+Impl::VariablesCount<TYPE> CountVariables(TYPE);
 
 //
 //template <typename BASE>
@@ -195,123 +252,123 @@ inline auto CountVariables(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...
 ////template <typename TYPE>
 ////TYPE UnboxType(TYPE const &);
 ////
-//nullptr_t UnboxType(TypeBox<nullptr_t> const &);
+//std::nullptr_t UnboxType(TypeBox<std::nullptr_t> const &);
 //
 //#define DATATYPEFOR(PRIMITIVE_OR_RULE) typename std::remove_reference_t<decltype(UnboxType(Resolve(std::declval<PRIMITIVE_OR_RULE>())))>
 //
 //template <int... CODES>
-//TypeBox<nullptr_t> Resolve(CharVal<CODES...> const &);
-
-template <typename TYPE>
-class DataTypeFor;
-
-template <int... CODES>
-class DataTypeFor<CharVal<CODES...> >
-{
-public:
-    template <template <typename RULE> class TO_PRIMITIVE>
-    class Resolve
-    {
-    public:
-        using type = nullptr_t;
-    };
-};
-
-template <int... CODES>
-CharVal<CODES...> ToPrimitive(CharVal<CODES...> const &);
-
+//TypeBox<std::nullptr_t> Resolve(CharVal<CODES...> const &);
+//
+//template <typename TYPE>
+//class DataTypeFor;
+//
+//template <int... CODES>
+//class DataTypeFor<CharVal<CODES...> >
+//{
+//public:
+//    template <template <typename RULE> class TO_PRIMITIVE>
+//    class Resolve
+//    {
+//    public:
+//        using type = std::nullptr_t;
+//    };
+//};
+//
+//template <int... CODES>
+//CharVal<CODES...> ToPrimitive(CharVal<CODES...> const &);
+//
+////template <int CH1, int CH2>
+////TypeBox<SubstringPos> Resolve(CharRange<CH1, CH2> const &);
+//
 //template <int CH1, int CH2>
-//TypeBox<SubstringPos> Resolve(CharRange<CH1, CH2> const &);
-
-template <int CH1, int CH2>
-class DataTypeFor<CharRange<CH1, CH2> >
-{
-public:
-    template <template <typename RULE> class TO_PRIMITIVE>
-    class Resolve
-    {
-    public:
-        using type = SubstringPos;
-    };
-};
-
-template <int CH1, int CH2>
-CharRange<CH1, CH2> ToPrimitive(CharRange<CH1, CH2> const &);
-
-namespace Impl
-{
-    template <typename ELEM_DATA_TYPE>
-    class RepeatDataType
-    {
-    public:
-        class Elem;
-        using type = std::vector<Elem>;
-        class Elem : public ELEM_DATA_TYPE
-        {
-        };
-    };
-
-    template <>
-    class RepeatDataType<nullptr_t>
-    {
-    public:
-        using type = nullptr_t;
-    };
-
-    template <>
-    class RepeatDataType<SubstringPos>
-    {
-    public:
-        using type = SubstringPos;
-    };
-};
-
-
-//template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
-//TypeBox<typename Impl::RepeatDataType<DATATYPEFOR(PRIMITIVE)>::type> Resolve(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const &);
-
-template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE_OR_RULE>
-class DataTypeFor<RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> >
-{
-public:
-    template <template <typename> class TO_PRIMITIVE>
-    class Resolve
-    {
-    public:
-        using type = typename Impl::RepeatDataType<
-            typename DataTypeFor<typename TO_PRIMITIVE<PRIMITIVE_OR_RULE>::type>::template Resolve<TO_PRIMITIVE>::type>::type;
-    };
-};
-
-template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE_OR_RULE>
-RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> ToPrimitive(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> const &);
-
-//template <typename PRIMITIVE>
-//inline auto Resolve(RepeatType<1, 1, PRIMITIVE> const & repetition) -> TypeBox<decltype(Resolve(repetition.Primitive()))>;
-
-template <typename PRIMITIVE_OR_RULE>
-class DataTypeFor<RepeatType<1, 1, PRIMITIVE_OR_RULE> >
-{
-public:
-    template <template <typename> class TO_PRIMITIVE>
-    class Resolve
-    {
-    public:
-        using type = typename DataTypeFor<typename TO_PRIMITIVE<PRIMITIVE_OR_RULE>::type>::template Resolve<TO_PRIMITIVE>::type;
-    };
-};
+//class DataTypeFor<CharRange<CH1, CH2> >
+//{
+//public:
+//    template <template <typename RULE> class TO_PRIMITIVE>
+//    class Resolve
+//    {
+//    public:
+//        using type = SubstringPos;
+//    };
+//};
+//
+//template <int CH1, int CH2>
+//CharRange<CH1, CH2> ToPrimitive(CharRange<CH1, CH2> const &);
+//
+//namespace Impl
+//{
+//    template <typename ELEM_DATA_TYPE>
+//    class RepeatDataType
+//    {
+//    public:
+//        class Elem;
+//        using type = std::vector<Elem>;
+//        class Elem : public ELEM_DATA_TYPE
+//        {
+//        };
+//    };
+//
+//    template <>
+//    class RepeatDataType<std::nullptr_t>
+//    {
+//    public:
+//        using type = std::nullptr_t;
+//    };
+//
+//    template <>
+//    class RepeatDataType<SubstringPos>
+//    {
+//    public:
+//        using type = SubstringPos;
+//    };
+//};
+//
+//
+////template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
+////TypeBox<typename Impl::RepeatDataType<DATATYPEFOR(PRIMITIVE)>::type> Resolve(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const &);
+//
+//template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE_OR_RULE>
+//class DataTypeFor<RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> >
+//{
+//public:
+//    template <template <typename> class TO_PRIMITIVE>
+//    class Resolve
+//    {
+//    public:
+//        using type = typename Impl::RepeatDataType<
+//            typename DataTypeFor<typename TO_PRIMITIVE<PRIMITIVE_OR_RULE>::type>::template Resolve<TO_PRIMITIVE>::type>::type;
+//    };
+//};
+//
+//template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE_OR_RULE>
+//RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> ToPrimitive(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE_OR_RULE> const &);
+//
+////template <typename PRIMITIVE>
+////inline auto Resolve(RepeatType<1, 1, PRIMITIVE> const & repetition) -> TypeBox<decltype(Resolve(repetition.Primitive()))>;
+//
+//template <typename PRIMITIVE_OR_RULE>
+//class DataTypeFor<RepeatType<1, 1, PRIMITIVE_OR_RULE> >
+//{
+//public:
+//    template <template <typename> class TO_PRIMITIVE>
+//    class Resolve
+//    {
+//    public:
+//        using type = typename DataTypeFor<typename TO_PRIMITIVE<PRIMITIVE_OR_RULE>::type>::template Resolve<TO_PRIMITIVE>::type;
+//    };
+//};
 
 namespace Impl
 {
     SubstringPos Cat(SubstringPos const &, SubstringPos const &);
 
     template <typename ANY>
-    ANY Cat(ANY const &, nullptr_t);
+    ANY Cat(ANY const &, std::nullptr_t);
 
-    nullptr_t Cat(nullptr_t, nullptr_t);
+    std::nullptr_t Cat(std::nullptr_t, std::nullptr_t);
 
     template <typename ANY>
-    ANY Cat(nullptr_t, ANY const &);
+    ANY Cat(std::nullptr_t, ANY const &);
 
     template <typename TYPE1, typename... TYPES>
     std::tuple<TYPE1, TYPES...> Cat(TYPE1 const &, std::tuple<TYPES...> const &);
@@ -322,105 +379,105 @@ namespace Impl
     template <typename TYPE1, typename TYPE2>
     std::tuple<TYPE1, TYPE2> Cat(TYPE1 const &, TYPE2 const &);
 
-    template <template <typename> class TO_PRIMITIVE, typename... TYPES>
-    class SeqDataType;
+    //template <template <typename> class TO_PRIMITIVE, typename... TYPES>
+    //class SeqDataType;
 
-    template <template <typename> class TO_PRIMITIVE, typename TYPE1, typename... OTHER_TYPES>
-    class SeqDataType<TO_PRIMITIVE, TYPE1, OTHER_TYPES...>
-    {
-    public:
-        using type = decltype(Cat(
-            std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE1>::type>::template Resolve<TO_PRIMITIVE>::type>(),
-            std::declval<typename SeqDataType<TO_PRIMITIVE, OTHER_TYPES...>::type>()));
-    };
-    
-    template <template <typename> class TO_PRIMITIVE, typename TYPE1, typename TYPE2>
-    class SeqDataType<TO_PRIMITIVE, TYPE1, TYPE2>
-    {
-    public:
-        using type = decltype(Cat(
-            std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE1>::type>::template Resolve<TO_PRIMITIVE>::type>(),
-            std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE2>::type>::template Resolve<TO_PRIMITIVE>::type>()));
-    };
+    //template <template <typename> class TO_PRIMITIVE, typename TYPE1, typename... OTHER_TYPES>
+    //class SeqDataType<TO_PRIMITIVE, TYPE1, OTHER_TYPES...>
+    //{
+    //public:
+    //    using type = decltype(Cat(
+    //        std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE1>::type>::template Resolve<TO_PRIMITIVE>::type>(),
+    //        std::declval<typename SeqDataType<TO_PRIMITIVE, OTHER_TYPES...>::type>()));
+    //};
+    //
+    //template <template <typename> class TO_PRIMITIVE, typename TYPE1, typename TYPE2>
+    //class SeqDataType<TO_PRIMITIVE, TYPE1, TYPE2>
+    //{
+    //public:
+    //    using type = decltype(Cat(
+    //        std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE1>::type>::template Resolve<TO_PRIMITIVE>::type>(),
+    //        std::declval<typename DataTypeFor<typename TO_PRIMITIVE<TYPE2>::type>::template Resolve<TO_PRIMITIVE>::type>()));
+    //};
 
-    template <template <typename> class TO_PRIMITIVE, typename TYPE1>
-    class SeqDataType<TO_PRIMITIVE, TYPE1>
-    {
-    public:
-        //using type = DATATYPEFOR(TYPE1);
-        using type = typename TO_PRIMITIVE<TYPE1>::type;
-    };
+    //template <template <typename> class TO_PRIMITIVE, typename TYPE1>
+    //class SeqDataType<TO_PRIMITIVE, TYPE1>
+    //{
+    //public:
+    //    //using type = DATATYPEFOR(TYPE1);
+    //    using type = typename TO_PRIMITIVE<TYPE1>::type;
+    //};
 
-    template <typename TYPE>
-    class Detuplify
-    {
-    public:
-        using type = TYPE;
-    };
+    //template <typename TYPE>
+    //class Detuplify
+    //{
+    //public:
+    //    using type = TYPE;
+    //};
 
-    template <typename TYPE>
-    class Detuplify<std::tuple<TYPE> >
-    {
-    public:
-        using type = TYPE;
-    };
+    //template <typename TYPE>
+    //class Detuplify<std::tuple<TYPE> >
+    //{
+    //public:
+    //    using type = TYPE;
+    //};
 }
 
 //template <typename SEQ_TYPE, typename... PRIMITIVES>
 //TypeBox<typename Impl::Detuplify<typename Impl::SeqDataType<PRIMITIVES...>::type>::type> Resolve(SequenceType<SEQ_TYPE, PRIMITIVES...> const &);
 //
-template <typename SEQ_TYPE, typename... PRIMITIVES>
-class DataTypeFor<SequenceType<SEQ_TYPE, PRIMITIVES...> >
-{
-public:
-    template <template <typename RULE> class TO_PRIMITIVE>
-    class Resolve
-    {
-    public:
-        using type = typename Impl::Detuplify<typename Impl::SeqDataType<TO_PRIMITIVE, PRIMITIVES...>::type>::type;
-    };
-};
-
-template <typename SEQ_TYPE, typename... PRIMITIVES>
-SequenceType<SEQ_TYPE, PRIMITIVES...> ToPrimitive(SequenceType<SEQ_TYPE, PRIMITIVES...> const &);
-
-template <int CODE>
-std::false_type IsRawVariable(CharVal<CODE> const & primitive);
-
-template <int... CODES, ENABLED_IF(sizeof...(CODES) > 1)>
-std::true_type IsRawVariable(CharVal<CODES...> const & primitive);
-
-template <int CH1, int CH2>
-auto IsRawVariable(CharRange<CH1, CH2> const & primitive) -> decltype(std::bool_constant<(CH2 > CH1)>());
-
-template <typename SEQ_TYPE, typename PRIMITIVE>
-auto IsRawVariable(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence) -> decltype(IsRawVariable(std::declval<PRIMITIVE>()));
-
-template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
-auto IsRawVariable(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & sequence) -> decltype(IsRawVariable(std::declval<PRIMITIVE>()));
-
-template <typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(sizeof...(OTHER_PRIMITIVES) > 0)>
-auto IsRawVariable(SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
--> std::bool_constant<CONSTANT(IsRawVariable(std::declval<PRIMITIVE>()))
-                   && CONSTANT(IsRawVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>;
-
-template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES,
-    ENABLED_IF((SEQ_TYPE::value != SeqTypeSeq::value) && (sizeof...(OTHER_PRIMITIVES) > 0))>
-auto IsRawVariable(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
--> std::bool_constant<(CONSTANT(IsRawVariable(std::declval<PRIMITIVE>())) || CONSTANT(IsConstant(std::declval<PRIMITIVE>())))
-                   && (CONSTANT(IsRawVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))
-                        || CONSTANT(IsConstant(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >())))>;
-
-template <typename SEQ_TYPE, size_t INDEX, typename... OTHER_PRIMITIVES>
-auto IsRawVariable(SequenceType<SEQ_TYPE, Idx<INDEX>, OTHER_PRIMITIVES...> const & sequence)
--> decltype(IsRawVariable(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >()));
-
-template <typename PRIMITIVE>
-auto IsStructured(PRIMITIVE const & primitive)
--> std::bool_constant<
-       (false == CONSTANT(IsRawVariable(std::declval<PRIMITIVE>()))
-    && (false == CONSTANT(IsConstant(std::declval<PRIMITIVE>()))))>;
-
+//template <typename SEQ_TYPE, typename... PRIMITIVES>
+//class DataTypeFor<SequenceType<SEQ_TYPE, PRIMITIVES...> >
+//{
+//public:
+//    template <template <typename RULE> class TO_PRIMITIVE>
+//    class Resolve
+//    {
+//    public:
+//        using type = typename Impl::Detuplify<typename Impl::SeqDataType<TO_PRIMITIVE, PRIMITIVES...>::type>::type;
+//    };
+//};
+//
+//template <typename SEQ_TYPE, typename... PRIMITIVES>
+//SequenceType<SEQ_TYPE, PRIMITIVES...> ToPrimitive(SequenceType<SEQ_TYPE, PRIMITIVES...> const &);
+//
+//template <int CODE>
+//std::false_type IsRawVariable(CharVal<CODE> const & primitive);
+//
+//template <int... CODES, ENABLED_IF(sizeof...(CODES) > 1)>
+//std::true_type IsRawVariable(CharVal<CODES...> const & primitive);
+//
+//template <int CH1, int CH2>
+//auto IsRawVariable(CharRange<CH1, CH2> const & primitive) -> decltype(std::bool_constant<(CH2 > CH1)>());
+//
+//template <typename SEQ_TYPE, typename PRIMITIVE>
+//auto IsRawVariable(SequenceType<SEQ_TYPE, PRIMITIVE> const & sequence) -> decltype(IsRawVariable(std::declval<PRIMITIVE>()));
+//
+//template <size_t MIN_COUNT, size_t MAX_COUNT, typename PRIMITIVE>
+//auto IsRawVariable(RepeatType<MIN_COUNT, MAX_COUNT, PRIMITIVE> const & sequence) -> decltype(IsRawVariable(std::declval<PRIMITIVE>()));
+//
+//template <typename PRIMITIVE, typename... OTHER_PRIMITIVES, ENABLED_IF(sizeof...(OTHER_PRIMITIVES) > 0)>
+//auto IsRawVariable(SequenceType<SeqTypeSeq, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+//-> std::bool_constant<CONSTANT(IsRawVariable(std::declval<PRIMITIVE>()))
+//                   && CONSTANT(IsRawVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))>;
+//
+//template <typename SEQ_TYPE, typename PRIMITIVE, typename... OTHER_PRIMITIVES,
+//    ENABLED_IF((SEQ_TYPE::value != SeqTypeSeq::value) && (sizeof...(OTHER_PRIMITIVES) > 0))>
+//auto IsRawVariable(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & sequence)
+//-> std::bool_constant<(CONSTANT(IsRawVariable(std::declval<PRIMITIVE>())) || CONSTANT(IsConstant(std::declval<PRIMITIVE>())))
+//                   && (CONSTANT(IsRawVariable(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >()))
+//                        || CONSTANT(IsConstant(std::declval<SequenceType<SeqTypeSeq, OTHER_PRIMITIVES...> >())))>;
+//
+//template <typename SEQ_TYPE, size_t INDEX, typename... OTHER_PRIMITIVES>
+//auto IsRawVariable(SequenceType<SEQ_TYPE, Idx<INDEX>, OTHER_PRIMITIVES...> const & sequence)
+//-> decltype(IsRawVariable(std::declval<SequenceType<SEQ_TYPE, OTHER_PRIMITIVES...> >()));
+//
+//template <typename PRIMITIVE>
+//auto IsStructured(PRIMITIVE const & primitive)
+//-> std::bool_constant<
+//       (false == CONSTANT(IsRawVariable(std::declval<PRIMITIVE>()))
+//    && (false == CONSTANT(IsConstant(std::declval<PRIMITIVE>()))))>;
+//
 template <MaxCharType CODE, typename OSTREAM>
 inline void CodesToString(OSTREAM & os)
 {
@@ -438,7 +495,7 @@ inline void CodesToString(OSTREAM & os)
 }
 
 template <typename PARSER, MaxCharType... CODES>
-inline bool Parse(PARSER & parser, nullptr_t, char const * ruleName, CharVal<CODES...> const & what, bool escape = false)
+inline bool Parse(PARSER & parser, std::nullptr_t, char const * ruleName, CharVal<CODES...> const & what, bool escape = false)
 {
     auto ch(parser.Input()());
     if (Match(ch, what))
@@ -457,7 +514,7 @@ inline bool Parse(PARSER & parser, nullptr_t, char const * ruleName, CharVal<COD
 }
 
 template <typename PARSER, MaxCharType CH1, MaxCharType CH2>
-inline bool Parse(PARSER & parser, nullptr_t, char const * ruleName, CharRange<CH1, CH2> const & what, bool escape = false)
+inline bool Parse(PARSER & parser, std::nullptr_t, char const * ruleName, CharRange<CH1, CH2> const & what, bool escape = false)
 {
     auto ch(parser.Input()());
     if (Match(ch, what))
@@ -480,7 +537,7 @@ inline bool Parse(PARSER & parser, nullptr_t, char const * ruleName, CharRange<C
 namespace Impl
 {
     template <size_t INDEX, typename TUPLE_TYPE, ENABLED_IF(INDEX != INDEX_THIS && INDEX != INDEX_NONE), ENABLED_IF_TUPLISH(TUPLE_TYPE)>
-    inline auto FieldNotNull(TUPLE_TYPE * type) -> decltype(&std::get<INDEX>(*type))
+    inline auto FieldNotNull(Idx<INDEX> idx, TUPLE_TYPE * type) -> decltype(&std::get<INDEX>(*type))
     {
         if (type != nullptr)
         {
@@ -489,26 +546,26 @@ namespace Impl
         return nullptr;
     }
 
+    template <size_t INDEX, typename TYPE, ENABLED_IF(INDEX != INDEX_THIS && INDEX != INDEX_NONE), ENABLED_IF_NOT_TUPLISH(TYPE)>
+    inline std::nullptr_t FieldNotNull(Idx<INDEX> idx, TYPE * type)
+    {
+        return nullptr;
+    }
+
     template <size_t INDEX, typename TYPE, ENABLED_IF(INDEX == INDEX_THIS)>
-    inline TYPE * FieldNotNull(TYPE * type)
+    inline TYPE * FieldNotNull(Idx<INDEX> idx, TYPE * type)
     {
         return type;
     }
 
     template <size_t INDEX, typename TYPE_PTR, ENABLED_IF(INDEX == INDEX_NONE)>
-    inline nullptr_t FieldNotNull(TYPE_PTR type)
+    inline std::nullptr_t FieldNotNull(Idx<INDEX> idx, TYPE_PTR type)
     {
         return nullptr;
     }
 
     template <size_t INDEX>
-    inline nullptr_t FieldNotNull(SubstringPos * type)
-    {
-        return nullptr;
-    }
-
-    template <size_t INDEX>
-    inline nullptr_t FieldNotNull(nullptr_t = nullptr)
+    inline std::nullptr_t FieldNotNull(Idx<INDEX> idx, std::nullptr_t)
     {
         return nullptr;
     }
@@ -522,21 +579,17 @@ namespace Impl
         }
     }
 
-    template <typename ELEM>
-    inline void PushBackIfNotNull(SubstringPos *, ELEM const &)
-    {
-    }
-
-    template <typename ELEM>
-    inline void PushBackIfNotNull(nullptr_t, ELEM const &)
+    template <typename TYPE, typename ELEM>
+    inline void PushBackIfNotNull(TYPE &&, ELEM const &)
     {
     }
 
     template <typename ELEM>
     inline ELEM ElemTypeOrNull(std::vector<ELEM> const *);
 
-    inline nullptr_t ElemTypeOrNull(nullptr_t);
-    inline nullptr_t ElemTypeOrNull(SubstringPos *);
+    template <typename TYPE>
+    inline std::nullptr_t ElemTypeOrNull(TYPE const *);
+    inline std::nullptr_t ElemTypeOrNull(std::nullptr_t);
 
     template <typename ELEM>
     inline ELEM * PtrOrNull(ELEM & e)
@@ -544,64 +597,83 @@ namespace Impl
         return &e;
     }
 
-    inline nullptr_t PtrOrNull(nullptr_t = nullptr)
+    inline std::nullptr_t PtrOrNull(std::nullptr_t = nullptr)
     {
         return nullptr;
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE,
-        typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF(OFFSET == sizeof...(PRIMITIVES) - 1)>
-    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+    template <size_t IMPLICIT_INDEX, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES>
+    class ResolveIndex : public Idx<
+        (CONSTANT(IsConstant(std::declval<NEXT_ELEMENT>()))
+            ? INDEX_NONE
+            : (std::is_same<SEQ_TYPE, SeqTypeAlt>::value || CONSTANT(CountVariables(std::declval<SequenceType<SEQ_TYPE, PRIMITIVES...> >())) <= 1)
+                ? INDEX_THIS
+                : IMPLICIT_INDEX)>
     {
-        enum { INDEX = CONSTANT(IsConstant(nextElement)) ? INDEX_NONE :
-            (((SEQ_TYPE::value == SeqTypeAlt::value )
-                || (CONSTANT(CountVariables(what)) <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
-        return Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement.Name(), nextElement);
+
+    };
+
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF(OFFSET == sizeof...(PRIMITIVES) - 1)>
+    inline bool ParseSequenceItem(Idx<OFFSET> offset, Idx<IMPLICIT_INDEX> implicitIndex, PARSER & parser, IO_STATE & ioState, DEST_PTR dest,
+        NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & sequence)
+    {
+        // Seq([..., ]CurrentItem, Primitive
+        using ResolvedIndex = ResolveIndex<IMPLICIT_INDEX, NEXT_ELEMENT, SEQ_TYPE, PRIMITIVES...>;
+        return Parse(parser, Impl::FieldNotNull(ResolvedIndex(), dest), nextElement.Name(), nextElement);
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE,
-        typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF(OFFSET == sizeof...(PRIMITIVES) - 2)>
-    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, size_t EXPLICIT_INDEX, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF(OFFSET == sizeof...(PRIMITIVES) - 2)>
+    inline bool ParseSequenceItem(Idx<OFFSET> offset, Idx<IMPLICIT_INDEX> implicitIndex, PARSER & parser, IO_STATE & ioState, DEST_PTR dest,
+        Idx<EXPLICIT_INDEX> const & explicitIndex, SequenceType<SEQ_TYPE, PRIMITIVES...> const & sequence)
     {
-        return Parse(parser, Impl::FieldNotNull<INDEX>(dest), std::get<OFFSET + 1>(what.Primitives()).Name(), std::get<OFFSET + 1>(what.Primitives()));
+        // Seq([..., ]CurrentItem, Idx<EXPLICIT_INDEX>(), Primitive)
+        enum { NEXT_OFFSET = sizeof...(PRIMITIVES) - 1 };
+        auto const & nextElement(std::get<NEXT_OFFSET>(sequence.Primitives()));
+        return Parse(parser, Impl::FieldNotNull(explicitIndex, dest), nextElement.Name(), nextElement);
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE,
-        typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF(OFFSET < sizeof...(PRIMITIVES) - 1)>
-    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what);
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF(OFFSET < sizeof...(PRIMITIVES) - 1)>
+    inline bool ParseSequenceItem(Idx<OFFSET> offset, Idx<IMPLICIT_INDEX> implicitIndex, PARSER & parser, IO_STATE & ioState, DEST_PTR dest,
+        NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & sequence);
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE,
-        typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF(OFFSET < sizeof...(PRIMITIVES) - 2)>
-    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, Idx<INDEX> const &, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, size_t INDEX, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF(OFFSET < sizeof...(PRIMITIVES) - 2)>
+    inline bool ParseSequenceItem(Idx<OFFSET> offset, Idx<IMPLICIT_INDEX> implicitIndex, PARSER & parser, IO_STATE & ioState, DEST_PTR dest,
+        Idx<INDEX> const & explicitIndex, SequenceType<SEQ_TYPE, PRIMITIVES...> const & sequence)
     {
-        auto const & nextElement(std::get<OFFSET + 1>(what.Primitives()));
+        // Seq([..., ]CurrentItem, Idx<EXPLICIT_INDEX>(), Primitive, ...)
+        auto const & nextElement(std::get<OFFSET + 1>(sequence.Primitives()));
 
-        bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement.Name(), nextElement);
+        bool result = Parse(parser, Impl::FieldNotNull(explicitIndex, dest), nextElement.Name(), nextElement);
         if (result)
             ioState.SetPossibleMatch();
 
         if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
-            return ParseItem<OFFSET + 2, IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 2>(what.Primitives()), what) || ioState.HasPossibleMatch();
+            return ParseSequenceItem(Idx<OFFSET + 2>(), implicitIndex, parser, ioState, dest,
+                std::get<OFFSET + 2>(sequence.Primitives()), sequence) || ioState.HasPossibleMatch();
         else
             return ioState.HasPossibleMatch();
     }
 
-    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE,
-        typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF_DEF(OFFSET < sizeof...(PRIMITIVES) - 1)>
-    inline bool ParseItem(PARSER & parser, IO_STATE & ioState, DEST_PTR dest, NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
+    template <size_t OFFSET, size_t IMPLICIT_INDEX, typename PARSER, typename IO_STATE, typename DEST_PTR, typename NEXT_ELEMENT, typename SEQ_TYPE, typename... PRIMITIVES, ENABLED_IF_DEF(OFFSET < sizeof...(PRIMITIVES) - 1)>
+    inline bool ParseSequenceItem(Idx<OFFSET> offset, Idx<IMPLICIT_INDEX> implicitIndex, PARSER & parser, IO_STATE & ioState, DEST_PTR dest,
+        NEXT_ELEMENT const & nextElement, SequenceType<SEQ_TYPE, PRIMITIVES...> const & sequence)
     {
-        enum { INDEX = CONSTANT(IsConstant(nextElement)) ? INDEX_NONE :
-            (((SEQ_TYPE::value == SeqTypeAlt::value )
-                || (CONSTANT(CountVariables(what)) <= 1)) ? INDEX_THIS : IMPLICIT_INDEX) };
+        // Seq([..., ]CurrentItem, Primitive, ...)
+        using ResolvedIndex = ResolveIndex<IMPLICIT_INDEX, NEXT_ELEMENT, SEQ_TYPE, PRIMITIVES...>;
 
-        enum { NEXT_IMPLICIT_INDEX = (INDEX == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX) };
-
-        bool result = Parse(parser, Impl::FieldNotNull<INDEX>(dest), nextElement.Name(), nextElement);
+        bool result = Parse(parser, Impl::FieldNotNull(ResolvedIndex(), dest), nextElement.Name(), nextElement);
         if (result)
             ioState.SetPossibleMatch();
 
+        enum
+        {
+            // Increment the implicit index, only if it was allocated by ResolveIndex
+            NEXT_IMPLICIT_INDEX = (ResolvedIndex::value == IMPLICIT_INDEX ? IMPLICIT_INDEX + 1 : IMPLICIT_INDEX)
+        };
+
         if ((SEQ_TYPE::value != SeqTypeSeq::value) || result)
-            return ParseItem<OFFSET + 1, NEXT_IMPLICIT_INDEX>(parser, ioState, dest, std::get<OFFSET + 1>(what.Primitives()), what) || ioState.HasPossibleMatch();
+            return ParseSequenceItem(Idx<OFFSET + 1>(), Idx<NEXT_IMPLICIT_INDEX>(), parser, ioState, dest,
+                std::get<OFFSET + 1>(sequence.Primitives()), sequence) || ioState.HasPossibleMatch();
         else
             return ioState.HasPossibleMatch();
     }
@@ -611,7 +683,7 @@ template <typename PARSER, typename DEST_PTR, typename SEQ_TYPE, typename... PRI
 inline bool Parse(PARSER & parser, DEST_PTR dest, char const * ruleName, SequenceType<SEQ_TYPE, PRIMITIVES...> const & what)
 {
     auto ioState(parser.template Save<false, SEQ_TYPE::value != SeqTypeSeq::value>(dest, ruleName));
-    if (Impl::ParseItem<0, 0>(parser, ioState, dest, std::get<0>(what.Primitives()), what))
+    if (Impl::ParseSequenceItem(Idx<0>(), Idx<0>(), parser, ioState, dest, std::get<0>(what.Primitives()), what))
     {
         return ioState.Success();
     }
@@ -658,7 +730,7 @@ inline bool Parse(PARSER & parser, ELEMS_PTR elems, char const * ruleName, Repea
 
 // Some compilers need that enable_if dependant on function signature are used as return type
 template <typename PRIMITIVE>
-ENABLED_IF_RET(CONSTANT(IsConstant(std::declval<PRIMITIVE>())), nullptr_t) DefaultData(PRIMITIVE const & primitive);
+ENABLED_IF_RET(CONSTANT(IsConstant(std::declval<PRIMITIVE>())), std::nullptr_t) DefaultData(PRIMITIVE const & primitive);
 
 template <typename PRIMITIVE>
 ENABLED_IF_RET(CONSTANT(IsRawVariable(std::declval<PRIMITIVE>())), SubstringPos) DefaultData(PRIMITIVE const & primitive);
@@ -696,7 +768,8 @@ auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & 
     class name { public: \
         static char const * Name() { return #name; } \
     }; \
-    class IsConstant_##name IsConstant(name); \
+    class Constantness_##name IsConstant(name); \
+    class VariablesCount_##name CountVariables(name); \
     //class Resolve_##name Resolve(name const &);
 
 
@@ -704,6 +777,8 @@ auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & 
     //class DefaultData_##name DefaultData(name);
 
 #define PARSER_RULE_PARTIAL(name, ...) \
+    class Constantness_##name : public decltype(IsConstant(__VA_ARGS__)) { }; \
+    class VariablesCount_##name : public decltype(CountVariables(__VA_ARGS__)) { }; \
     template <typename PARSER, typename TYPE> \
     inline bool Parse(PARSER & parser, TYPE result, char const *, name) { return Parse(parser, result, #name, __VA_ARGS__); } \
     template <typename PARSER, typename TYPE> \
@@ -722,8 +797,8 @@ auto DefaultData(SequenceType<SEQ_TYPE, PRIMITIVE, OTHER_PRIMITIVES...> const & 
         } \
         return false; \
     } \
-    class IsConstant_##name : public decltype(IsConstant(__VA_ARGS__)) {}; \
-    inline auto ToPrimitive(name) { return __VA_ARGS__; }
+    //class IsConstant_##name : public decltype(IsConstant(__VA_ARGS__)) {}; \
+    //inline auto ToPrimitive(name) { return __VA_ARGS__; }
     //class Resolve_##name : public decltype(Resolve(__VA_ARGS__)) { };
 
 

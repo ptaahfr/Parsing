@@ -12,6 +12,14 @@
 #include <vector>
 #include <cassert>
 #include <algorithm>
+#include <type_traits>
+
+#ifndef __min
+#define __min(a, b) (((a)<(b))?(a):(b))
+#endif
+#ifndef __max
+#define __max(a, b) (((a)>(b))?(a):(b))
+#endif
 
 #define ENABLED_IF(condition) std::enable_if_t<(condition), void *> = nullptr
 #define ENABLED_IF_DEF(condition) std::enable_if_t<(condition), void *>
@@ -22,17 +30,11 @@
 
 #include "NamedTuple.hpp"
 
-template <typename TYPE>
-class IsTuplish : public std::integral_constant<bool, false> { };
+template <size_t N>
+using Idx = std::integral_constant<size_t, N>;
 
-template <typename... ARGS>
-class IsTuplish<std::tuple<ARGS...> > : public std::integral_constant<bool, true> { };
-
-template <typename LAST_MEMBER>
-class IsTuplish<NamedTuple::NamedTuple<LAST_MEMBER> > : public std::integral_constant<bool, true> { };
-
-#define ENABLED_IF_TUPLISH(which) std::enable_if_t<IsTuplish<which>::value, void *> = nullptr
-#define ENABLED_IF_TUPLISH_DEF(which) std::enable_if_t<IsTuplish<which>::value, void *> 
+template <bool N>
+using Bool = std::integral_constant<bool, N>;
 
 using MaxCharType = int;
 
@@ -51,7 +53,7 @@ inline bool IsEmpty(SubstringPos const & sub)
     return sub.second <= sub.first;
 }
 
-inline bool IsEmpty(nullptr_t)
+inline bool IsEmpty(std::nullptr_t)
 {
     return true;
 }
@@ -95,7 +97,7 @@ inline bool IsNull(SubstringPos const & sub)
     return IsEmpty(sub) && sub.first == 0;
 }
 
-inline bool IsNull(nullptr_t)
+inline bool IsNull(std::nullptr_t)
 {
     return true;
 }

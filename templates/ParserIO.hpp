@@ -137,31 +137,33 @@ public:
 
 public:
     template <bool REPEAT, bool ALT, typename RESULT_PTR>
-    class SavedIOState : public SavedIOState<REPEAT, ALT, nullptr_t>
+    class SavedIOState : public SavedIOState<REPEAT, ALT, std::nullptr_t>
     {
-        using Base = SavedIOState<REPEAT, ALT, nullptr_t>;
+        using Base = SavedIOState<REPEAT, ALT, std::nullptr_t>;
         using ResultType = std::remove_pointer_t<RESULT_PTR>;
     protected:
         RESULT_PTR result_;
 
     private:
-        template <bool REPEAT2>
-        static inline nullptr_t GetPreviousState(SubstringPos * result)
+        template <typename RESULT2_PTR>
+        static inline std::nullptr_t GetPreviousState(Idx<1> isRepeat, RESULT2_PTR result)
         {
             return nullptr;
         }
 
-        template <bool REPEAT2, typename ELEM_TYPE>
-        static inline size_t GetPreviousState(std::vector<ELEM_TYPE> * result)
+        template <typename ELEM_TYPE>
+        static inline size_t GetPreviousState(Idx<1> isRepeat, std::vector<ELEM_TYPE> * result)
         {
             return result->size();
         }
 
-        template <bool REPEAT2, typename RESULT2_PTR, ENABLED_IF(REPEAT2 == false)>
-        static inline nullptr_t GetPreviousState(RESULT2_PTR result)
+        template <typename RESULT2_PTR>
+        static inline std::nullptr_t GetPreviousState(Idx<0> isRepeat, RESULT2_PTR result)
         {
             return nullptr;
         }
+
+        decltype(GetPreviousState(Idx<(size_t)REPEAT>(), result_)) previousState_;
 
         template <typename ELEM_TYPE>
         static inline void SetPreviousState(std::vector<ELEM_TYPE> * result, size_t previousState)
@@ -170,12 +172,10 @@ public:
         }
 
         template <typename RESULT>
-        static inline void SetPreviousState(RESULT * result, nullptr_t)
+        static inline void SetPreviousState(RESULT * result, std::nullptr_t)
         {
             *result = {};
         }
-
-        decltype(GetPreviousState<REPEAT>(result_)) previousState_;
 
         template <typename RESULT2_PTR>
         static inline void SetResult(RESULT2_PTR result, SubstringPos newResult)
@@ -188,7 +188,7 @@ public:
         }
     public:
         inline SavedIOState(ParserIO & parent, RESULT_PTR result, char const * ruleName)
-            : Base(parent, nullptr, ruleName), previousState_(GetPreviousState<REPEAT>(result)), result_(result)
+            : Base(parent, nullptr, ruleName), result_(result), previousState_(GetPreviousState(Idx<(size_t)REPEAT>(), result))
         {
         }
 
@@ -232,7 +232,7 @@ public:
     };
     
     template <bool REPEAT>
-    class SavedIOState<REPEAT, false, nullptr_t>
+    class SavedIOState<REPEAT, false, std::nullptr_t>
     {
     protected:
         ParserIO & parent_;
@@ -241,7 +241,7 @@ public:
         char const * ruleName_;
         std::list<ErrorFunctionType> savedErrors_;
     public:
-        inline SavedIOState(ParserIO & parent, nullptr_t, char const * ruleName)
+        inline SavedIOState(ParserIO & parent, std::nullptr_t, char const * ruleName)
             : parent_(parent), inputPos_(parent.Input().Pos()), outputPos_(parent.Output().Pos()),
             ruleName_(ruleName)
         {
@@ -298,7 +298,7 @@ public:
         }
 
     protected:
-        inline nullptr_t Result()
+        inline std::nullptr_t Result()
         {
             return nullptr;
         }
@@ -312,7 +312,7 @@ public:
         size_t bestOutputPos_ = 0;
         size_t bestInputPos_ = 0;
 
-        static inline nullptr_t SaveAlternative(nullptr_t, nullptr_t)
+        static inline std::nullptr_t SaveAlternative(std::nullptr_t, std::nullptr_t)
         {
             return nullptr;
         }
@@ -331,7 +331,7 @@ public:
             return &r;
         }
 
-        static inline nullptr_t PtrToBestAlternative(nullptr_t)
+        static inline std::nullptr_t PtrToBestAlternative(std::nullptr_t)
         {
             return nullptr;
         }

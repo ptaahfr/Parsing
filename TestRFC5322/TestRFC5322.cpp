@@ -9,6 +9,35 @@
 #include "ParserIO.hpp"
 #include "rfc5322/RFC5322Rules.hpp"
 
+class PrintVisitor
+{
+    static size_t const IndentationSpacing = 4;
+    size_t indentation_ = 0;
+    std::vector<char> const & buffer_;
+public:
+    inline PrintVisitor(std::vector<char> const & buffer)
+    : buffer_(buffer)
+    {
+
+    }
+
+    template <typename MEMBER_INFO, typename CONTINUATION>
+    inline void OnMember(MEMBER_INFO const & memberInfo, SubstringPos memberValue, CONTINUATION && continuation)
+    {
+        std::cout << std::string(indentation_, ' ') << memberInfo.GetName() << ": " << ToString(buffer_, memberValue) << std::endl;
+    }
+
+    template <typename MEMBER_INFO, typename TYPE, typename CONTINUATION>
+    inline void OnMember(MEMBER_INFO const & memberInfo, TYPE const & memberValue, CONTINUATION && continuation)
+    {
+        std::cout << std::string(indentation_, ' ') << memberInfo.GetName() << ":" << std::endl;
+        indentation_ += IndentationSpacing;
+        continuation();
+        indentation_ -= IndentationSpacing;
+    }
+};
+
+
 void test_address(std::string const & addr)
 {
     std::cout << addr;
@@ -16,58 +45,23 @@ void test_address(std::string const & addr)
     auto parser(Make_ParserFromString(addr));
     using namespace RFC5322;
 
+    MailboxData mailbox;
+    ParseExact(parser, &mailbox);
+
     AddressListData addresses;
     if (ParseExact(parser, &addresses))
     {
-        auto const & outBuffer = parser.OutputBuffer();
         std::cout << " is OK\n";
         std::cout << addresses.size() << " address" << (addresses.size() > 1 ? "es" : "") << " parsed." << std::endl;
+
         for (AddressData const & address : addresses)
         {
-            auto displayAddress = [&](AddrSpecData const & addrSpec, auto indent)
-            {
-                std::cout << indent << "     Adress: " << std::endl;
-                std::cout << indent << "       Local-Part: '" << ToString(outBuffer, false, addrSpec.LocalPart) << "'" << std::endl;
-                std::cout << indent << "       Domain-Part: '" << ToString(outBuffer, false, addrSpec.DomainPart) << "'" << std::endl;
-            };
+            NamedTuple::Visit(address, PrintVisitor(parser.OutputBuffer()));
 
-            auto displayMailBox = [&](MailboxData const & mailbox, auto indent)
-            {
-                std::cout << indent << "   Mailbox:" << std::endl;
-                if (IsEmpty(mailbox.AddrSpec))
-                {
-                    auto const & nameAddrData = mailbox.NameAddr;
-                    std::cout << indent << "     Display Name: '" << ToString(outBuffer, true, nameAddrData.DisplayName) << std::endl;
-                    displayAddress(nameAddrData.Address.Content, indent);
-                }
-                else
-                {
-                    displayAddress(mailbox.AddrSpec, indent);
-                }
-            };
-
-            if (false == IsEmpty(address.Mailbox))
-            {
-                displayMailBox(address.Mailbox, "");
-            }
-            else
-            {
-                auto const & group = address.Group;
-                std::cout << "   Group:" << std::endl;
-                std::cout << "     Display Name: '" << ToString(outBuffer, true, group.DisplayName) << "'" << std::endl;
-                std::cout << "     Members:" << std::endl;
-                for (auto const & groupAddr : group.GroupList.Mailboxes)
-                {
-                    displayMailBox(groupAddr, "   ");
-                }
-            }
+            continue;
         }
     }
-    else
-    {
-        std::cout << " is NOK\n";
-    }
-    
+
     //for (auto const & parseError : parser.Errors())
     //{
     //    std::cerr << "Parsing error at " << std::get<0>(parseError) << ":" << std::get<1>(parseError) << std::endl;
